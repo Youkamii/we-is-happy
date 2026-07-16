@@ -157,10 +157,13 @@ export class Terrain {
       solid.set(next)
     }
 
-    // 3) 월드 경계 밖과 시작점 주변은 비운다
+    // 3) 월드 경계 밖과 시작점 주변은 비운다.
+    //    넓게 비우는 게 중요하다. 좁게 비우면 시작 지점이 **요새**가 된다 —
+    //    적은 벽을 갉느라 느리고 그동안 자동 무기가 다 죽여서, 가만히 서 있어도
+    //    5분을 완주했다(실측). 조작이 필요 없는 게임은 게임이 아니다.
     const cx0 = this.cellX(0)
     const cy0 = this.cellY(0)
-    const clearR = 5
+    const clearR = 13
     for (let cy = 0; cy < rows; cy++) {
       for (let cx = 0; cx < cols; cx++) {
         const wx = this.originX + cx * CELL + CELL * 0.5

@@ -152,7 +152,13 @@ export class Player {
   }
 
   /**
-   * 오른 레벨 수를 반환한다. XP 곡선은 완만하게 — 5분에 12~16레벨이 목표.
+   * 오른 레벨 수를 반환한다.
+   *
+   * 곡선 튜닝 근거(봇 6판 실측): lv²·0.42 로는 5분에 Lv 91 까지 갔다.
+   * 무기 만렙이 8이고 슬롯이 5개라 Lv 40 이면 고를 게 남지 않고, 그 뒤 50레벨은
+   * "숨 고르기"만 뜬다 — 레벨업이 보상이 아니라 방해가 되는 구간이다.
+   * 5분에 Lv 30~40 이 목표.
+   *
    * 한 번에 여러 레벨이 오를 수 있다(자석으로 XP 를 한꺼번에 빨아들일 때).
    * 한 레벨만 올리면 나머지 XP 가 조용히 증발한다.
    */
@@ -162,7 +168,7 @@ export class Player {
     while (this.xp >= this.xpNeeded) {
       this.xp -= this.xpNeeded
       this.level++
-      this.xpNeeded = Math.floor(5 + this.level * 3.1 + this.level * this.level * 0.42)
+      this.xpNeeded = Math.floor(5 + this.level * 4.2 + this.level * this.level * 1.35)
       gained++
     }
     return gained

@@ -228,10 +228,11 @@ export class Game implements FireCtx {
 
     // 초당 스폰 수 — 후반에 화면이 터지도록 지수적으로.
     // 상수항이 곧 "첫 30초의 밀도"다. 여기가 낮으면 시작이 허전해서 첫인상을 잃는다.
-    const rate = 22 + progress * progress * 320 + progress * 80
+    const rate = 24 + progress * progress * 430 + progress * 95
     this.spawnTimer += dt * rate
 
-    const hpScale = 1 + progress * 3.4
+    // 후반 체력 배율. 3.4 로는 봇 완주율이 83% 였다 — 5분 버티기가 아니라 5분 산책이다.
+    const hpScale = 1 + progress * progress * 7.5 + progress * 1.5
     const rand = this.randFn
 
     while (this.spawnTimer >= 1) {

@@ -83,13 +83,45 @@ export class Bot {
       my += (-p.y / r) * inward * 2.4
     }
 
-    const len = Math.hypot(mx, my)
-    if (len > 1e-6) {
-      this.move.x = mx / len
-      this.move.y = my / len
-    } else {
+    let len = Math.hypot(mx, my)
+    if (len < 1e-6) {
       this.move.x = 0
       this.move.y = 0
+      return
     }
+    mx /= len
+    my /= len
+
+    // 5) 벽 타기. 지형을 모르면 벽 쪽으로 도망치다 구석에 몰려 20초 만에 죽는다
+    //    (실측: 지형을 넣자마자 봇 완주율이 4/6 → 2/6 으로 떨어진 원인이 이거였다).
+    //    사람은 벽을 보고 피하므로, 이게 없으면 게임이 아니라 계측이 틀린 것이다.
+    const t = game.terrain
+    const probe = 78
+    if (t.solidAt(p.x + mx * probe, p.y + my * probe)) {
+      // 진행 방향이 막혔다 → 수직 두 방향 중 열린 쪽으로 미끄러진다
+      const tx = -my
+      const ty = mx
+      const openA = !t.solidAt(p.x + tx * probe, p.y + ty * probe)
+      const openB = !t.solidAt(p.x - tx * probe, p.y - ty * probe)
+      if (openA && !openB) {
+        mx = tx
+        my = ty
+      } else if (openB && !openA) {
+        mx = -tx
+        my = -ty
+      } else if (openA && openB) {
+        // 둘 다 열렸으면 원래 가려던 쪽에 가까운 접선을 고른다
+        const bias = this.wander % 2 < 1 ? 1 : -1
+        mx = tx * bias
+        my = ty * bias
+      }
+      // 둘 다 막혔으면 그대로 밀고 간다 — 벽은 어차피 적이 뚫어 준다
+      len = Math.hypot(mx, my) || 1
+      mx /= len
+      my /= len
+    }
+
+    this.move.x = mx
+    this.move.y = my
   }
 }
