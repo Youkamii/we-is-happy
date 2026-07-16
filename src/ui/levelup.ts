@@ -5,6 +5,7 @@
  * 여기서 뜸을 들이면 안 된다 — 숫자 1/2/3 으로 즉시 고를 수 있어야 한다.
  */
 import type { Choice } from '../game/loadout'
+import { levelGainOf } from '../game/player'
 
 /** HDR 색(1 초과)을 CSS 로 눌러 담는다. */
 function css(r: number, g: number, b: number, scale = 1): string {
@@ -61,6 +62,18 @@ export class LevelUpUI {
       'font:800 34px/1 ui-monospace,monospace;letter-spacing:.22em;color:#ffe3a8;' +
       'text-shadow:0 0 28px rgba(255,170,60,.85);'
     wrap.appendChild(title)
+
+    // 레벨 자체가 준 성장. 3택은 안 고른 2개가 손실감이라, 선택과 무관하게
+    // 강해졌다는 걸 보여줘야 레벨업이 온전한 보상이 된다.
+    const g = levelGainOf(level)
+    const growth = document.createElement('div')
+    const parts = [`체력 +${g.maxHp}`, `피해 +${g.damage}%`]
+    if (g.milestone) parts.push(g.milestone)
+    growth.textContent = parts.join('   ')
+    growth.style.cssText =
+      `font:600 12px/1 ui-monospace,monospace;letter-spacing:.08em;margin-top:-8px;` +
+      `color:${g.milestone ? '#ffd166' : '#7fe3b8'};`
+    wrap.appendChild(growth)
 
     const row = document.createElement('div')
     row.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;justify-content:center;'

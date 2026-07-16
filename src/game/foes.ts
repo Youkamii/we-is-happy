@@ -151,7 +151,7 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
 
     let desiredX = 0
     let desiredY = 0
-    const speed = stat.speed
+    const speed = stat.speed * foes.slow[i]!
 
     switch (stat.behavior) {
       case Behavior.Dash: {
@@ -264,6 +264,10 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
 
     // ── 상태 타이머
     if (foes.flash[i]! > 0) foes.flash[i]! -= dt
+    // 정지장을 벗어나면 스스로 회복한다. 필드가 매 틱 다시 덮어쓰므로,
+    // 안에 있는 동안은 이 회복이 무의미하고 나가는 순간부터 유효해진다.
+    if (foes.slow[i]! < 1) foes.slow[i] = Math.min(1, foes.slow[i]! + dt * 1.1)
+    if (foes.frail[i]! > 1) foes.frail[i] = Math.max(1, foes.frail[i]! - dt * 2.5)
   }
 
   result.contactDamage = contactDamage

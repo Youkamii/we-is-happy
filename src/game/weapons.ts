@@ -29,7 +29,21 @@ export interface FireCtx {
   damageFoe(j: number, damage: number, fromVx: number, fromVy: number): void
   shake(amount: number, decay?: number): void
   sfx(name: SfxName): void
+  /** 월드에 지속 효과체(중력정·신문·정지장)를 놓는다 */
+  placeField(kind: number, x: number, y: number, radius: number, power: number, life: number): void
+  /** 반경 안 적을 전부 밀거나 당긴다. force 가 음수면 당긴다. */
+  pushFoes(x: number, y: number, radius: number, force: number): void
+  /** 지형을 부순다 (혜성 전용) */
+  breakTerrain(x: number, y: number, radius: number, power: number): void
 }
+
+/** 지속 효과체 종류. game.ts 의 Fields 풀이 이 값으로 거동을 가른다. */
+export const Field = {
+  Well: 0, // 중력정 — 끌어당기고 갉는다
+  Sigil: 1, // 신문 — 밟으면 터진다
+  Still: 2, // 정지장 — 시간을 늦춘다
+  Echo: 3, // 반향 — 잠시 뒤 터진다
+} as const
 
 export const W = {
   Ember: 0,
@@ -38,6 +52,13 @@ export const W = {
   Orbit: 3,
   Nova: 4,
   Thorn: 5,
+  // ── 우주·신격 ──
+  Well: 6, // 중력정 — 빨아들여 뭉친다
+  Beam: 7, // 광선 — 관통 지속 빔
+  Comet: 8, // 혜성 — 지형을 뚫고 폭발
+  Sigil: 9, // 신문 — 발밑 인장
+  Echo: 10, // 반향 — 죽인 자리에서 다시 터진다
+  Still: 11, // 정지 — 시간을 늦춘다
 } as const
 
 export const P = {
@@ -47,6 +68,13 @@ export const P = {
   Bloom: 3,
   Greed: 4,
   Ward: 5,
+  // ── 우주·신격 ──
+  Split: 6, // 다중 — 발사체 +1
+  Pierce: 7, // 관통 — 관통 +1
+  Blast: 8, // 폭심 — 폭발 반경·연쇄
+  Essence: 9, // 정수 — 치명타
+  Recoil: 10, // 반동 — 넉백
+  Awaken: 11, // 각성 — 진화 요구 완화
 } as const
 
 export interface WeaponDef {
@@ -103,6 +131,42 @@ export const WEAPONS: readonly WeaponDef[] = [
     evoPassive: P.Ward, cooldown: 0.62,
     r: 1.2, g: 2.4, b: 0.7, shape: Shape.Mote, maxLevel: 8,
   },
+  {
+    id: W.Well, name: '중력정', desc: '허공에 우물을 판다. 닿은 것이 끌려들어간다',
+    evoName: '특이점', evoDesc: '삼킨 만큼 무거워지고, 한계에 닿으면 붕괴한다',
+    evoPassive: P.Blast, cooldown: 3.4,
+    r: 1.4, g: 0.5, b: 2.8, shape: Shape.Singularity, maxLevel: 8,
+  },
+  {
+    id: W.Beam, name: '광선', desc: '별빛을 한 줄기로 모은다. 닿는 모든 것을 태운다',
+    evoName: '천벌', evoDesc: '줄기가 갈라져 스스로 겨눈다',
+    evoPassive: P.Pierce, cooldown: 1.9,
+    r: 2.9, g: 2.2, b: 1.0, shape: Shape.Prism, maxLevel: 8,
+  },
+  {
+    id: W.Comet, name: '혜성', desc: '무거운 것을 던진다. 지형도 뚫는다',
+    evoName: '운석우', evoDesc: '하늘이 무너진다. 여러 개가 동시에',
+    evoPassive: P.Split, cooldown: 2.2,
+    r: 2.6, g: 1.3, b: 0.5, shape: Shape.Comet, maxLevel: 8,
+  },
+  {
+    id: W.Sigil, name: '신문', desc: '지나온 자리에 문양을 새긴다. 밟으면 터진다',
+    evoName: '봉인진', evoDesc: '문양이 서로를 잇는다. 선에 닿아도 터진다',
+    evoPassive: P.Essence, cooldown: 0.75,
+    r: 2.2, g: 1.9, b: 0.4, shape: Shape.Sigil, maxLevel: 8,
+  },
+  {
+    id: W.Echo, name: '반향', desc: '내가 부순 자리에서 소리가 되돌아온다',
+    evoName: '연쇄붕괴', evoDesc: '되돌아온 소리가 또 소리를 낳는다',
+    evoPassive: P.Recoil, cooldown: 0,
+    r: 0.6, g: 2.0, b: 2.6, shape: Shape.Rift, maxLevel: 8,
+  },
+  {
+    id: W.Still, name: '정지', desc: '주위의 시간이 느려진다',
+    evoName: '영겁', evoDesc: '멈춘 것들은 더 아프게 부서진다',
+    evoPassive: P.Awaken, cooldown: 4.2,
+    r: 0.5, g: 1.4, b: 2.9, shape: Shape.Halo, maxLevel: 8,
+  },
 ]
 
 export interface PassiveDef {
@@ -138,11 +202,49 @@ export const PASSIVES: readonly PassiveDef[] = [
     id: P.Ward, name: '수호', desc: '최대 체력 +16, 재생 +0.5/초', maxLevel: 8,
     apply: (p, l) => { p.stats.maxHp += 16 * l; p.stats.regen += 0.5 * l },
   },
+  {
+    // #9 에서 "선언만 있고 배선 없음"으로 잡혔던 Stats.multi 를 여기서 되살린다.
+    id: P.Split, name: '분광', desc: '발사체 +1 (2레벨마다)', maxLevel: 8,
+    apply: (p, l) => { p.stats.multi += l * 0.5 },
+  },
+  {
+    // 마찬가지로 Stats.pierce 의 첫 사용처.
+    id: P.Pierce, name: '투과', desc: '관통 +1 (2레벨마다)', maxLevel: 8,
+    apply: (p, l) => { p.stats.pierce += l * 0.5 },
+  },
+  {
+    id: P.Blast, name: '폭심', desc: '폭발 반경 +20%, 연쇄 +1', maxLevel: 8,
+    apply: (p, l) => { p.stats.blast *= 1 + 0.2 * l; p.stats.chain += l * 0.5 },
+  },
+  {
+    id: P.Essence, name: '정수', desc: '치명 확률 +6%, 치명 배율 +0.25', maxLevel: 8,
+    apply: (p, l) => { p.stats.critChance += 0.06 * l; p.stats.critMult += 0.25 * l },
+  },
+  {
+    id: P.Recoil, name: '반동', desc: '넉백 +35%, 이동 +4%', maxLevel: 8,
+    apply: (p, l) => { p.stats.knockback *= 1 + 0.35 * l; p.stats.speed *= 1 + 0.04 * l },
+  },
+  {
+    // 진화 요구를 낮춘다 — 이게 있으면 조합을 더 빨리 발견하게 된다.
+    id: P.Awaken, name: '각성', desc: '진화 요구 레벨 -1 (3레벨마다)', maxLevel: 6,
+    apply: (p, l) => { p.stats.awaken += Math.floor(l / 3) },
+  },
 ]
 
 /** 진화 조건: 무기와 짝 패시브가 모두 이 레벨 이상 */
 export const EVO_WEAPON_LEVEL = 5
 export const EVO_PASSIVE_LEVEL = 4
+
+/**
+ * 시작 무기가 될 수 있는 것들.
+ *
+ * 반향(Echo)은 **내가 죽인 자리**에서만 발동하므로 그것만 들고 시작하면 영원히 0킬이다
+ * (실측: 12초에 HP 21, 킬 0). 정지(Still)도 피해가 0이라 같은 문제다.
+ * 스스로 적을 죽일 수 있는 무기만 출발점이 된다.
+ */
+export const STARTER_WEAPONS: readonly number[] = [
+  W.Ember, W.Arc, W.Bolt, W.Orbit, W.Nova, W.Thorn, W.Well, W.Beam, W.Comet, W.Sigil,
+]
 
 export class WeaponSlot {
   level = 1
@@ -169,6 +271,8 @@ export function tickWeapon(slot: WeaponSlot, ctx: FireCtx, dt: number): void {
     tickOrbit(slot, ctx, dt)
     return
   }
+  // 반향도 발사가 없다. 내가 뭔가를 죽일 때 game.ts 가 echoKill() 을 부른다.
+  if (def.id === W.Echo) return
 
   slot.timer -= dt
   if (slot.timer > 0) return
@@ -180,7 +284,166 @@ export function tickWeapon(slot: WeaponSlot, ctx: FireCtx, dt: number): void {
     case W.Bolt: fireBolt(slot, ctx); break
     case W.Nova: fireNova(slot, ctx); break
     case W.Thorn: fireThorn(slot, ctx); break
+    case W.Well: fireWell(slot, ctx); break
+    case W.Beam: fireBeam(slot, ctx); break
+    case W.Comet: fireComet(slot, ctx); break
+    case W.Sigil: fireSigil(slot, ctx); break
+    case W.Still: fireStill(slot, ctx); break
   }
+}
+
+// ── 중력정 / 특이점 ────────────────────────────────────────────────────
+
+function fireWell(slot: WeaponSlot, ctx: FireCtx): void {
+  const p = ctx.player
+  const s = p.stats
+  // 가장 붐비는 쪽에 판다 — 아무 데나 파면 우물이 허공에 뜬다
+  const target = ctx.nearestFoe(p.x, p.y, 620)
+  let x = p.x + p.faceX * 200
+  let y = p.y + p.faceY * 200
+  if (target >= 0) {
+    x = ctx.foes.x[target]!
+    y = ctx.foes.y[target]!
+  }
+  const radius = (110 + slot.level * 12) * s.area * s.blast
+  const power = (14 + slot.level * 7) * s.damage
+  // 진화(특이점)는 오래 남고 끝에 붕괴한다
+  ctx.placeField(Field.Well, x, y, radius, power, slot.evolved ? 4.2 : 2.6)
+  ctx.sfx('nova')
+}
+
+// ── 광선 / 천벌 ────────────────────────────────────────────────────────
+
+function fireBeam(slot: WeaponSlot, ctx: FireCtx): void {
+  const p = ctx.player
+  const s = p.stats
+  const def = WEAPONS[W.Beam]!
+  // 진화하면 여러 줄기가 각자 겨눈다
+  const beams = slot.evolved ? 3 + Math.floor(s.multi) : 1
+  const len = (520 + slot.level * 40) * s.area
+  const width = (16 + slot.level * 2.2) * s.area
+  const dmg = (30 + slot.level * 14) * s.damage
+
+  for (let bIdx = 0; bIdx < beams; bIdx++) {
+    let dx = p.faceX
+    let dy = p.faceY
+    if (slot.evolved) {
+      // 각 줄기가 서로 다른 적을 문다
+      const t = ctx.nearestFoe(
+        p.x + Math.cos(bIdx * 2.1) * 160, p.y + Math.sin(bIdx * 2.1) * 160, 700,
+      )
+      if (t >= 0) {
+        dx = ctx.foes.x[t]! - p.x
+        dy = ctx.foes.y[t]! - p.y
+        const d = Math.hypot(dx, dy) || 1
+        dx /= d
+        dy /= d
+      }
+    } else {
+      const t = ctx.nearestFoe(p.x, p.y, 700)
+      if (t >= 0) {
+        dx = ctx.foes.x[t]! - p.x
+        dy = ctx.foes.y[t]! - p.y
+        const d = Math.hypot(dx, dy) || 1
+        dx /= d
+        dy /= d
+      }
+    }
+
+    // 빔 축을 따라 캡슐 판정. 선분 거리로 한 번에 훑는다.
+    const ex = p.x + dx * len
+    const ey = p.y + dy * len
+    const midX = (p.x + ex) * 0.5
+    const midY = (p.y + ey) * 0.5
+    const n = ctx.foesInRadius(midX, midY, len * 0.5 + width, hitBuf)
+    for (let k = 0; k < n; k++) {
+      const j = hitBuf[k]!
+      // 점-선분 거리
+      const px = ctx.foes.x[j]! - p.x
+      const py = ctx.foes.y[j]! - p.y
+      const t = Math.max(0, Math.min(len, px * dx + py * dy))
+      const cx = px - dx * t
+      const cy = py - dy * t
+      if (cx * cx + cy * cy > width * width) continue
+      ctx.damageFoe(j, dmg, dx, dy)
+    }
+
+    // 연출: 축을 따라 섬광을 깐다
+    const steps = 16
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps
+      ctx.motes.spawn(
+        p.x + dx * len * t, p.y + dy * len * t, 0, 0,
+        0.18, width * 1.6, def.r, def.g, def.b, Shape.Spark,
+        0, Math.atan2(dy, dx), 1,
+      )
+    }
+    ctx.motes.spawn(ex, ey, 0, 0, 0.3, width * 3, def.r, def.g, def.b, Shape.Nova, 0, 0, 1)
+  }
+  ctx.shake(4, 14)
+  ctx.sfx('bolt')
+}
+
+// ── 혜성 / 운석우 ──────────────────────────────────────────────────────
+
+function fireComet(slot: WeaponSlot, ctx: FireCtx): void {
+  const p = ctx.player
+  const s = p.stats
+  const count = (slot.evolved ? 3 : 1) + Math.floor(s.multi)
+  const dmg = (26 + slot.level * 12) * s.damage
+  const speed = 420 * s.projSpeed
+
+  for (let k = 0; k < count; k++) {
+    const t = ctx.nearestFoe(
+      p.x + (ctx.rng.next() - 0.5) * 400, p.y + (ctx.rng.next() - 0.5) * 400, 800,
+    )
+    let dx = p.faceX
+    let dy = p.faceY
+    if (t >= 0) {
+      dx = ctx.foes.x[t]! - p.x
+      dy = ctx.foes.y[t]! - p.y
+      const d = Math.hypot(dx, dy) || 1
+      dx /= d
+      dy /= d
+    }
+    const spread = count > 1 ? (ctx.rng.next() - 0.5) * 0.5 : 0
+    const c = Math.cos(spread)
+    const sn = Math.sin(spread)
+    ctx.shots.spawn(
+      p.x, p.y,
+      (dx * c - dy * sn) * speed, (dx * sn + dy * c) * speed,
+      2.2, dmg, 99, (16 + slot.level * 1.8) * s.area,
+      slot.evolved ? 128 + W.Comet : W.Comet,
+      ctx.rng.next(),
+    )
+  }
+  ctx.shake(3, 16)
+  ctx.sfx('shoot')
+}
+
+// ── 신문 / 봉인진 ──────────────────────────────────────────────────────
+
+function fireSigil(slot: WeaponSlot, ctx: FireCtx): void {
+  const p = ctx.player
+  const s = p.stats
+  // 지나온 자리에 새긴다 — 움직임이 곧 배치다
+  const radius = (54 + slot.level * 5) * s.area * s.blast
+  const power = (18 + slot.level * 9) * s.damage
+  ctx.placeField(Field.Sigil, p.x, p.y, radius, power, slot.evolved ? 7 : 4.5)
+  ctx.sfx('pickup')
+}
+
+// ── 정지 / 영겁 ────────────────────────────────────────────────────────
+
+function fireStill(slot: WeaponSlot, ctx: FireCtx): void {
+  const p = ctx.player
+  const s = p.stats
+  const radius = (150 + slot.level * 16) * s.area
+  // 진화(영겁)는 멈춘 것을 더 아프게 만든다 — power 가 피해 증폭 배율로 쓰인다
+  const power = slot.evolved ? 1.9 : 1
+  ctx.placeField(Field.Still, p.x, p.y, radius, power, 3.2)
+  ctx.sfx('nova')
+  ctx.shake(3, 12)
 }
 
 // ── 불씨 / 장작불 ──────────────────────────────────────────────────────
@@ -459,4 +722,22 @@ function fireThorn(slot: WeaponSlot, ctx: FireCtx): void {
  */
 export function isEvolvedShot(weapon: number): boolean {
   return weapon >= 128
+}
+
+/**
+ * 반향 — 무언가 죽은 자리에서 소리가 되돌아온다.
+ * game.ts 의 killFoe 가 부른다. 확률로 발동해야 화면이 연쇄로 뒤덮이지 않는다.
+ */
+export function echoKill(slot: WeaponSlot, ctx: FireCtx, x: number, y: number, depth: number): void {
+  const s = ctx.player.stats
+  // 진화(연쇄붕괴)는 반향이 또 반향을 낳는다. depth 로 상한을 둔다 —
+  // 없으면 후반 초당 수백 킬에서 무한 연쇄가 되어 프레임이 죽는다.
+  const maxDepth = slot.evolved ? 2 + Math.floor(s.chain) : 0
+  if (depth > maxDepth) return
+  const chance = (0.16 + slot.level * 0.035) * (depth === 0 ? 1 : 0.45)
+  if (ctx.rng.next() > chance) return
+
+  const radius = (58 + slot.level * 7) * s.area * s.blast
+  const power = (14 + slot.level * 8) * s.damage
+  ctx.placeField(Field.Echo, x, y, radius, power, 0.42)
 }

@@ -6,13 +6,13 @@
  * 선택지에 힌트가 뜨고, 조건을 채우면 진화가 선택지로 올라온다.
  */
 import type { Rng } from '../engine/rng'
-import { baseStats, type Player } from './player'
+import { applyLevelGrowth, baseStats, type Player } from './player'
 import {
   EVO_PASSIVE_LEVEL, EVO_WEAPON_LEVEL, PASSIVES, WEAPONS, WeaponSlot,
 } from './weapons'
 
-export const MAX_WEAPONS = 5
-export const MAX_PASSIVES = 5
+export const MAX_WEAPONS = 6
+export const MAX_PASSIVES = 6
 
 export type ChoiceKind = 'weapon' | 'passive' | 'evolve' | 'heal'
 
@@ -49,10 +49,13 @@ export class Loadout {
   /**
    * 스탯 전체 재계산. 패시브는 곱연산이라 증분 적용하면 되돌릴 수가 없다 —
    * 매번 처음부터 다시 쌓는 게 유일하게 안전한 방법이다.
+   * 레벨 성장도 같은 이유로 여기 포함된다.
    */
   recomputeStats(player: Player): void {
     const hpRatio = player.stats.maxHp > 0 ? player.hp / player.stats.maxHp : 1
     player.stats = baseStats()
+    // 레벨 성장 먼저 — 패시브의 곱연산이 그 위에 얹힌다
+    applyLevelGrowth(player.stats, player.level)
     for (let i = 0; i < PASSIVES.length; i++) {
       const lv = this.passives[i]!
       if (lv > 0) PASSIVES[i]!.apply(player, lv)
@@ -61,22 +64,24 @@ export class Loadout {
     player.hp = Math.min(player.stats.maxHp, player.stats.maxHp * hpRatio)
   }
 
-  /** 이 무기가 지금 진화 가능한가 */
-  canEvolve(slot: WeaponSlot): boolean {
+  /** 이 무기가 지금 진화 가능한가 (각성이 요구를 낮춘다) */
+  canEvolve(slot: WeaponSlot, awaken = 0): boolean {
     if (slot.evolved) return false
     const def = WEAPONS[slot.def]!
-    return slot.level >= EVO_WEAPON_LEVEL && this.passives[def.evoPassive]! >= EVO_PASSIVE_LEVEL
+    const needW = Math.max(2, EVO_WEAPON_LEVEL - awaken)
+    const needP = Math.max(2, EVO_PASSIVE_LEVEL - awaken)
+    return slot.level >= needW && this.passives[def.evoPassive]! >= needP
   }
 
   /** 아직 진화 못 했지만 짝이 보이는 상태인지 — 힌트 문구용 */
-  private evoHint(slot: WeaponSlot): string {
+  private evoHint(slot: WeaponSlot, awaken: number): string {
     if (slot.evolved) return ''
     const def = WEAPONS[slot.def]!
     const pLv = this.passives[def.evoPassive]!
     if (pLv === 0) return ''
     const pName = PASSIVES[def.evoPassive]!.name
-    const needW = Math.max(0, EVO_WEAPON_LEVEL - slot.level)
-    const needP = Math.max(0, EVO_PASSIVE_LEVEL - pLv)
+    const needW = Math.max(0, Math.max(2, EVO_WEAPON_LEVEL - awaken) - slot.level)
+    const needP = Math.max(0, Math.max(2, EVO_PASSIVE_LEVEL - awaken) - pLv)
     if (needW === 0 && needP === 0) return `${pName}와 맞물린다 — 진화 준비 완료`
     const parts: string[] = []
     if (needW > 0) parts.push(`${def.name} +${needW}`)
@@ -85,13 +90,13 @@ export class Loadout {
   }
 
   /** 이 패시브를 올리면 어떤 무기가 진화에 가까워지는지 */
-  private passiveHint(passiveId: number, nextLevel: number): string {
+  private passiveHint(passiveId: number, nextLevel: number, awaken: number): string {
     for (const slot of this.weapons) {
       if (slot.evolved) continue
       const def = WEAPONS[slot.def]!
       if (def.evoPassive !== passiveId) continue
-      const needW = Math.max(0, EVO_WEAPON_LEVEL - slot.level)
-      const needP = Math.max(0, EVO_PASSIVE_LEVEL - nextLevel)
+      const needW = Math.max(0, Math.max(2, EVO_WEAPON_LEVEL - awaken) - slot.level)
+      const needP = Math.max(0, Math.max(2, EVO_PASSIVE_LEVEL - awaken) - nextLevel)
       if (needW === 0 && needP === 0) return `${def.name}이(가) 진화한다`
       const parts: string[] = []
       if (needW > 0) parts.push(`${def.name} +${needW}`)
@@ -106,11 +111,11 @@ export class Loadout {
    * 진화가 가능하면 반드시 하나는 진화를 띄운다 — 어렵게 맞춘 조합이
    * 확률에 묻혀 안 나오면 그건 그냥 화나는 일이다.
    */
-  roll(rng: Rng, count = 3): Choice[] {
+  roll(rng: Rng, count = 3, awaken = 0): Choice[] {
     const out: Choice[] = []
 
     for (const slot of this.weapons) {
-      if (!this.canEvolve(slot)) continue
+      if (!this.canEvolve(slot, awaken)) continue
       const def = WEAPONS[slot.def]!
       out.push({
         kind: 'evolve', index: slot.def,
@@ -135,7 +140,7 @@ export class Loadout {
         desc: slot.evolved ? def.evoDesc : def.desc,
         level: slot.level + 1,
         r: def.r, g: def.g, b: def.b,
-        hint: this.evoHint(slot),
+        hint: this.evoHint(slot, awaken),
       })
     }
 
@@ -162,7 +167,7 @@ export class Loadout {
         kind: 'passive', index: def.id,
         title: def.name, desc: def.desc, level: lv + 1,
         r: 1.6, g: 1.7, b: 2.0,
-        hint: this.passiveHint(def.id, lv + 1),
+        hint: this.passiveHint(def.id, lv + 1, awaken),
       })
     }
 
@@ -192,10 +197,7 @@ export class Loadout {
     switch (choice.kind) {
       case 'evolve': {
         const slot = this.findWeapon(choice.index)
-        if (slot) {
-          slot.evolved = true
-          slot.level = Math.max(slot.level, EVO_WEAPON_LEVEL)
-        }
+        if (slot) slot.evolved = true
         break
       }
       case 'weapon': {
@@ -213,6 +215,8 @@ export class Loadout {
         player.heal(30)
         break
       }
+      default:
+        break
     }
   }
 }

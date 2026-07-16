@@ -81,6 +81,14 @@ export class Foes extends PoolBase {
   /** 화상 남은 시간과 초당 피해 */
   readonly burn: Float32Array
   readonly burnDps: Float32Array
+  /**
+   * 감속 배율 (1 = 정상). 정지장이 매 틱 덮어쓰고, 벗어나면 스스로 1로 돌아온다.
+   * (예전에 이 필드가 있었지만 슬로우를 거는 무기가 없어 영원히 1이었다 — 적대 리뷰가
+   *  "hot loop 안의 상수"라고 잡아 지웠고, W.Still 이 생기면서 되살아났다.)
+   */
+  readonly slow: Float32Array
+  /** 피해 증폭 배율 (1 = 정상). 영겁(정지 진화)이 건다. */
+  readonly frail: Float32Array
   readonly seed: Float32Array
 
   constructor(capacity: number) {
@@ -97,6 +105,8 @@ export class Foes extends PoolBase {
     this.pushY = new Float32Array(capacity)
     this.burn = new Float32Array(capacity)
     this.burnDps = new Float32Array(capacity)
+    this.slow = new Float32Array(capacity)
+    this.frail = new Float32Array(capacity)
     this.seed = new Float32Array(capacity)
   }
 
@@ -115,6 +125,8 @@ export class Foes extends PoolBase {
     this.pushY[i] = 0
     this.burn[i] = 0
     this.burnDps[i] = 0
+    this.slow[i] = 1
+    this.frail[i] = 1
     this.seed[i] = seed
     return i
   }
@@ -237,6 +249,62 @@ export class Motes extends PoolBase {
     this.spin[i] = spin
     this.rot[i] = rot
     this.drag[i] = drag
+    return i
+  }
+}
+
+/**
+ * 지속 효과체 — 중력정·신문·정지장·반향.
+ *
+ * 탄과 다른 풀인 이유: 이것들은 날아가지 않고 **자리에 남아** 매 틱 주변에 작용한다.
+ * Shots 에 억지로 끼우면 "속도 0인 탄"이라는 거짓말이 되고, 거동 분기가 hot path 에 는다.
+ */
+export class Fields extends PoolBase {
+  readonly x: Float32Array
+  readonly y: Float32Array
+  readonly radius: Float32Array
+  /** 효과 세기. 종류마다 의미가 다르다 (피해/초, 폭발 피해, 감속 배율). */
+  readonly power: Float32Array
+  readonly life: Float32Array
+  readonly maxLife: Float32Array
+  readonly kind: Uint8Array
+  /** 중력정이 삼킨 양 — 특이점의 붕괴 판정에 쓴다 */
+  readonly charge: Float32Array
+  readonly seed: Float32Array
+  /** 진화형인지 (거동이 갈린다) */
+  readonly evolved: Uint8Array
+
+  constructor(capacity: number) {
+    super(capacity)
+    this.x = new Float32Array(capacity)
+    this.y = new Float32Array(capacity)
+    this.radius = new Float32Array(capacity)
+    this.power = new Float32Array(capacity)
+    this.life = new Float32Array(capacity)
+    this.maxLife = new Float32Array(capacity)
+    this.kind = new Uint8Array(capacity)
+    this.charge = new Float32Array(capacity)
+    this.seed = new Float32Array(capacity)
+    this.evolved = new Uint8Array(capacity)
+  }
+
+  spawn(
+    kind: number, x: number, y: number,
+    radius: number, power: number, life: number,
+    evolved: boolean, seed: number,
+  ): number {
+    const i = this.acquire()
+    if (i < 0) return -1
+    this.kind[i] = kind
+    this.x[i] = x
+    this.y[i] = y
+    this.radius[i] = radius
+    this.power[i] = power
+    this.life[i] = life
+    this.maxLife[i] = life
+    this.charge[i] = 0
+    this.seed[i] = seed
+    this.evolved[i] = evolved ? 1 : 0
     return i
   }
 }

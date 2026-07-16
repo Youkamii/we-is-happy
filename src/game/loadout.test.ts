@@ -8,7 +8,9 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { Rng } from '../engine/rng'
 import { Loadout, MAX_PASSIVES, MAX_WEAPONS } from './loadout'
 import { Player } from './player'
-import { EVO_PASSIVE_LEVEL, EVO_WEAPON_LEVEL, P, PASSIVES, W, WEAPONS } from './weapons'
+import {
+  EVO_PASSIVE_LEVEL, EVO_WEAPON_LEVEL, P, PASSIVES, STARTER_WEAPONS, W, WEAPONS,
+} from './weapons'
 
 describe('Loadout', () => {
   let lo: Loadout
@@ -27,9 +29,38 @@ describe('Loadout', () => {
     }
   })
 
-  it('무기 6종의 진화 짝이 서로 겹치지 않는다 (한 패시브가 전부를 진화시키면 조합이 아니다)', () => {
+  it('진화 짝이 서로 겹치지 않는다 (한 패시브가 전부를 진화시키면 조합이 아니다)', () => {
     const pairs = WEAPONS.map((w) => w.evoPassive)
     expect(new Set(pairs).size).toBe(WEAPONS.length)
+  })
+
+  it('무기 12종 · 패시브 12종이 다 있다', () => {
+    expect(WEAPONS.length).toBe(12)
+    expect(PASSIVES.length).toBe(12)
+  })
+
+  it('무기/패시브 id 가 배열 인덱스와 일치한다 (테이블 조회가 id 로 이뤄진다)', () => {
+    WEAPONS.forEach((w, i) => expect(w.id, w.name).toBe(i))
+    PASSIVES.forEach((p, i) => expect(p.id, p.name).toBe(i))
+  })
+
+  it('이름이 중복되지 않는다 (선택지에서 뭐가 뭔지 구분이 안 된다)', () => {
+    const names = [...WEAPONS.map((w) => w.name), ...WEAPONS.map((w) => w.evoName)]
+    expect(new Set(names).size).toBe(names.length)
+    const pNames = PASSIVES.map((p) => p.name)
+    expect(new Set(pNames).size).toBe(pNames.length)
+  })
+
+  it('시작 무기는 스스로 적을 죽일 수 있어야 한다', () => {
+    // 실제로 있었던 일: 반향(Echo)으로 시작하면 영원히 0킬이다 — 반향은 **내가 죽인
+    // 자리**에서만 발동하는데 죽일 수단이 없다. 실측 12초에 HP 21, 킬 0.
+    // 정지(Still)도 피해가 0이라 같은 문제.
+    expect(STARTER_WEAPONS).not.toContain(W.Echo)
+    expect(STARTER_WEAPONS).not.toContain(W.Still)
+    // 나머지는 전부 출발점이 될 수 있어야 한다 (시작 빌드 다양성)
+    expect(STARTER_WEAPONS.length).toBe(WEAPONS.length - 2)
+    expect(new Set(STARTER_WEAPONS).size).toBe(STARTER_WEAPONS.length)
+    for (const id of STARTER_WEAPONS) expect(WEAPONS[id]).toBeDefined()
   })
 
   it('조건을 채우기 전에는 진화할 수 없다', () => {

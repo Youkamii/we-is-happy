@@ -6,6 +6,7 @@
  */
 import { SpriteBatch, type View } from './batch'
 import { BloomPass } from './bloom'
+import { Cosmos } from './cosmos'
 import {
   createRenderTarget,
   detectFloatTargets,
@@ -25,6 +26,7 @@ export class Renderer {
   readonly gl: GL
   readonly batch: SpriteBatch
   readonly bloom: BloomPass
+  readonly cosmos: Cosmos
   readonly atlas: Atlas
   readonly hdr: boolean
 
@@ -49,6 +51,7 @@ export class Renderer {
     this.atlas = bakeAtlas(gl)
     this.batch = new SpriteBatch(gl, this.atlas, 65536)
     this.bloom = new BloomPass(gl, this.hdr)
+    this.cosmos = new Cosmos(gl)
 
     this.scene = createRenderTarget(
       gl, 1, 1, this.fmt.internal, this.fmt.format, this.fmt.type, gl.LINEAR,
@@ -72,13 +75,16 @@ export class Renderer {
     return true
   }
 
-  /** 씬 타깃을 비우고 배치를 연다. */
-  begin(view: View, bg: [number, number, number] = [0.012, 0.014, 0.024]): void {
+  /**
+   * 씬 타깃을 열고 배경(성운·별)을 깐 뒤 배치를 연다.
+   * cosmos 가 화면 전체를 덮으므로 clear 가 필요 없다.
+   */
+  begin(view: View, time: number): void {
     const gl = this.gl
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.scene.fbo)
     gl.viewport(0, 0, this.width, this.height)
-    gl.clearColor(bg[0], bg[1], bg[2], 1)
-    gl.clear(gl.COLOR_BUFFER_BIT)
+    // view.sx/sy 는 1/halfW, 1/halfH 다 — 역수를 취해 월드 반경을 되찾는다
+    this.cosmos.render(view.x, view.y, 1 / view.sx, 1 / view.sy, time)
     this.batch.begin(view)
   }
 

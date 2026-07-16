@@ -6,6 +6,7 @@ import { createContext, GLError } from './engine/gl'
 import { Input } from './engine/input'
 import { Renderer } from './engine/renderer'
 import { dailySeed, hashSeed } from './engine/rng'
+import { ACTS } from './game/acts'
 import { Game, Phase, RUN_SECONDS } from './game/game'
 import { LevelUpUI } from './ui/levelup'
 import { WEAPONS } from './game/weapons'
@@ -127,6 +128,14 @@ function boot(): void {
     'color:#cfe8ff;text-shadow:0 0 10px rgba(60,160,255,.55);white-space:pre;'
   ui.appendChild(hud)
 
+  // 막 전환 배너 — 15분을 하나의 곡선으로 만드는 이정표
+  const actBanner = document.createElement('div')
+  actBanner.style.cssText =
+    'position:absolute;left:0;right:0;top:24%;text-align:center;pointer-events:none;' +
+    'font:800 42px/1.5 ui-monospace,monospace;color:#ffe6b8;white-space:pre;' +
+    'text-shadow:0 0 40px rgba(255,180,80,.9);opacity:0;transition:opacity .5s;letter-spacing:.16em;'
+  ui.appendChild(actBanner)
+
   const center = document.createElement('div')
   center.style.cssText =
     'position:absolute;inset:0;display:grid;place-content:center;text-align:center;' +
@@ -213,14 +222,29 @@ function boot(): void {
         return `${w.evolved ? `${d.evoName}★` : d.name}${w.level}`
       })
       .join(' ')
+    const act = ACTS[game.act]!
+    const bossHp = game.bossIdx >= 0 && game.bossMaxHp > 0
+      ? Math.max(0, Math.round((game.foes.hp[game.bossIdx]! / game.bossMaxHp) * 100))
+      : -1
     hud.textContent =
+      `${game.act + 1}막 ${act.name}\n` +
       `${fmtTime(RUN_SECONDS - game.elapsed)}  남음\n` +
       `HP ${hpPct}%   Lv ${p.level}\n` +
       `처치 ${p.kills.toLocaleString()}\n` +
       `${gear}\n` +
+      (bossHp >= 0 ? `\n◆ 보스 ${bossHp}%\n` : '\n') +
       `\n` +
       `적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}  입자 ${game.motes.count.toLocaleString()}\n` +
       `fps ${fps.toFixed(0)}`
+
+    // 막 전환 — 화면 가운데에 잠깐. 15분이 5분×3이 아니라 하나의 곡선이 되려면
+    // "여기까지 왔다"는 이정표가 있어야 한다.
+    if (game.actIntro > 0 && !result) {
+      actBanner.style.opacity = String(Math.min(1, game.actIntro / 0.8))
+      actBanner.textContent = `${game.act + 1}막 · ${act.name}\n${act.sub}`
+    } else {
+      actBanner.style.opacity = '0'
+    }
 
     // 결과 화면은 판이 끝난 순간 한 번만 조립한다. 예전엔 rAF 마다 innerHTML 을
     // 통째로 재파싱했다 — 초당 60번 DOM 을 새로 짓는 건 그냥 낭비다.

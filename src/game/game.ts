@@ -4,6 +4,10 @@
  * 고정 타임스텝으로 시뮬레이션을 돌린다. 가변 dt 를 쓰면 프레임률에 따라
  * 밸런스가 달라지고, 협동에서 두 대의 결과가 갈린다.
  */
+import {
+  ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BOSS_AT, RUN_SECONDS, actIndexAt, actProgressAt,
+  type ActDef,
+} from './acts'
 import type { SfxName } from '../engine/audio'
 import { Camera } from '../engine/camera'
 import { SpatialHash } from '../engine/grid'
@@ -16,16 +20,19 @@ import { FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './f
 import { Loadout, type Choice } from './loadout'
 import { Player } from './player'
 import { CELL, Terrain } from './terrain'
-import { Drop, Drops, Foe, Foes, Motes, Shots, type FoeType } from './pools'
-import { isEvolvedShot, tickWeapon, W, WEAPONS, type FireCtx } from './weapons'
+import { Drop, Drops, Fields, Foe, Foes, Motes, Shots, type FoeType } from './pools'
+import {
+  echoKill, Field, isEvolvedShot, STARTER_WEAPONS, tickWeapon, W, WEAPONS, type FireCtx,
+} from './weapons'
 
 export const WORLD_R = 2600
-export const RUN_SECONDS = 300
+export { RUN_SECONDS } from './acts'
 
 const MAX_FOES = 20000
 const MAX_SHOTS = 4000
 const MAX_MOTES = 24000
 const MAX_DROPS = 3000
+const MAX_FIELDS = 512
 
 /** 시뮬레이션 고정 스텝 (초). 1/60. */
 const STEP = 1 / 60
@@ -40,12 +47,16 @@ export const Phase = {
 } as const
 export type PhaseType = (typeof Phase)[keyof typeof Phase]
 
+/** Field 종류 → 그걸 만든 무기. 진화 여부를 되찾을 때 쓴다. */
+const FIELD_OWNER: readonly number[] = [W.Well, W.Sigil, W.Still, W.Echo]
+
 export class Game implements FireCtx {
   readonly player = new Player()
   readonly foes = new Foes(MAX_FOES)
   readonly shots = new Shots(MAX_SHOTS)
   readonly motes = new Motes(MAX_MOTES)
   readonly drops = new Drops(MAX_DROPS)
+  readonly fields = new Fields(MAX_FIELDS)
   readonly camera = new Camera()
   readonly loadout = new Loadout()
   readonly hash = new SpatialHash(-WORLD_R, -WORLD_R, WORLD_R * 2, WORLD_R * 2, 52, MAX_FOES)
@@ -74,10 +85,31 @@ export class Game implements FireCtx {
   private readonly deadBuf = new Int32Array(2048)
   /** 불이 옮겨붙을 후보. queryBuf 와 반드시 별개여야 한다 (ignite 주석 참고). */
   private readonly spreadBuf = new Int32Array(256)
+  /**
+   * 폭발 대상. spreadBuf 와 별개여야 한다 — 필드가 spreadBuf 로 순회하는 중에
+   * explode 를 부르고, explode 가 죽인 적이 반향을 낳아 또 필드를 만든다.
+   */
+  private readonly blastBuf = new Int32Array(2048)
+  /** 필드 순회 전용. 필드가 explode 를 부르고 explode 가 또 필드를 만드므로 격리한다. */
+  private readonly fieldBuf = new Int32Array(2048)
   /** 스폰 함수에 넘길 난수원. 매 스폰마다 클로저를 새로 만들지 않으려고 붙잡아 둔다. */
   private readonly randFn = (): number => this.rng.next()
   /** 지형 충돌 결과를 받는 스크래치 */
   private readonly hit2 = new Float32Array(2)
+  /**
+   * 반향 연쇄 깊이. 반향이 죽인 적이 또 반향을 낳으므로 상한이 없으면
+   * 후반 초당 수백 킬에서 무한 연쇄가 되어 프레임이 죽는다.
+   */
+  private echoDepth = 0
+  /** 현재 막 (0-based) */
+  act = 0
+  /** 막 전환 연출 남은 시간 */
+  actIntro = 0
+  /** 이번 막 보스가 이미 나왔는가 */
+  private bossSpawned = false
+  /** 보스 엔티티 인덱스 (-1 = 없음). HUD 체력바가 읽는다. */
+  bossIdx = -1
+  bossMaxHp = 0
 
   phase: PhaseType = Phase.Playing
   elapsed = 0
@@ -113,6 +145,7 @@ export class Game implements FireCtx {
     this.shots.clear()
     this.motes.clear()
     this.drops.clear()
+    this.fields.clear()
     this.foeStamp.fill(0)
     this.acc = 0
     this.spawnTimer = 0
@@ -120,10 +153,16 @@ export class Game implements FireCtx {
     this.phase = Phase.Playing
     this.pendingChoices = []
     this.pendingLevels = 0
+    this.act = 0
+    this.actIntro = ACT_INTRO_SECONDS
+    this.bossSpawned = false
+    this.bossIdx = -1
+    this.echoDepth = 0
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
     this.terrain.generate(seed, WORLD_R, 1)
-    // 시작 무기는 시드로 정한다 — 매판 다른 빌드로 출발한다
-    this.loadout.reset(this.rng.int(WEAPONS.length))
+    // 시작 무기는 시드로 정한다 — 매판 다른 빌드로 출발한다.
+    // 스스로 죽일 수 있는 무기만 (반향·정지로 시작하면 영원히 0킬이다)
+    this.loadout.reset(STARTER_WEAPONS[this.rng.int(STARTER_WEAPONS.length)]!)
     this.loadout.recomputeStats(this.player)
     this.player.hp = this.player.stats.maxHp
     this.camera.x = 0
@@ -142,7 +181,7 @@ export class Game implements FireCtx {
     }
     this.pendingLevels--
     if (this.pendingLevels > 0) {
-      this.pendingChoices = this.loadout.roll(this.rng)
+      this.pendingChoices = this.loadout.roll(this.rng, 3, this.player.stats.awaken)
     } else {
       this.pendingChoices = []
       this.pendingLevels = 0
@@ -227,10 +266,13 @@ export class Game implements FireCtx {
     }
 
     this.tickWeapons(dt)
+    this.updateFields(dt)
     this.updateShots(dt)
     this.updateDrops(dt)
     updateMotes(this.motes, dt)
     this.spawn(dt)
+
+    this.tickActs(dt)
 
     if (this.elapsed >= RUN_SECONDS) {
       this.phase = Phase.Won
@@ -241,32 +283,27 @@ export class Game implements FireCtx {
   // ── 스폰 ─────────────────────────────────────────────────────────────
 
   /**
-   * 5분 곡선. 처음엔 숨을 주고, 갈수록 화면을 메운다.
-   * 여기 숫자가 게임의 난이도 전부다 — #6에서 웨이브 스케줄로 뺀다.
+   * 15분 곡선. 막마다 성격이 다르고, 막 안에서도 갈수록 조여든다.
+   * 규칙은 전부 acts.ts 데이터에 있다 — 밸런싱이 코드 수정이 되면 안 된다.
    */
   private spawn(dt: number): void {
-    const t = this.elapsed
-    const progress = t / RUN_SECONDS
+    const act = ACTS[this.act]!
+    const inAct = actProgressAt(this.elapsed)
+    const overall = this.elapsed / RUN_SECONDS
 
-    // 초당 스폰 수 — 후반에 화면이 터지도록 지수적으로.
-    // 상수항이 곧 "첫 30초의 밀도"다. 여기가 낮으면 시작이 허전해서 첫인상을 잃는다.
-    const rate = 24 + progress * progress * 430 + progress * 95
+    // 초당 스폰 예산. 막 배율 × (막 안 진행에 따른 조임) × (런 전체 가속)
+    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4)
     this.spawnTimer += dt * rate
 
-    // 후반 체력 배율. 3.4 로는 봇 완주율이 83% 였다 — 5분 버티기가 아니라 5분 산책이다.
-    const hpScale = 1 + progress * progress * 7.5 + progress * 1.5
+    // 체력: 막 배율에 막 안 진행분을 얹는다
+    const hpScale = act.hp * (1 + inAct * 0.55)
     const rand = this.randFn
 
     while (this.spawnTimer >= 1) {
       this.spawnTimer -= 1
       if (this.foes.count >= MAX_FOES - 32) break
 
-      const roll = this.rng.next()
-      let type: FoeType = Foe.Mote
-      if (progress > 0.62 && roll > 0.985) type = Foe.Eye
-      else if (progress > 0.2 && roll > 0.9) type = Foe.Hex
-      else if (progress > 0.1 && roll > 0.72) type = Foe.Wisp
-      else if (progress > 0.05 && roll > 0.52) type = Foe.Husk
+      const type = this.rollFoeType(act)
 
       // 화면 가장자리 바로 밖에서 나타나게. 더 멀면 걸어오는 데만 10초가 걸려
       // 초반이 텅 비고, 더 가까우면 눈앞에 튀어나와 불공정하다.
@@ -285,6 +322,68 @@ export class Game implements FireCtx {
         )
       }
     }
+  }
+
+  /**
+   * 막 진행. 전환·보스 소환을 여기서 본다.
+   * 성운 색 전이는 렌더 쪽(순수 연출)이라 여기선 상태만 바꾼다.
+   */
+  private tickActs(dt: number): void {
+    if (this.actIntro > 0) this.actIntro = Math.max(0, this.actIntro - dt)
+
+    const nowAct = actIndexAt(this.elapsed)
+    if (nowAct !== this.act) {
+      this.act = nowAct
+      this.actIntro = ACT_INTRO_SECONDS
+      this.bossSpawned = false
+      this.bossIdx = -1
+      // 막이 바뀌는 순간이 곧 이정표다 — 화면과 소리가 같이 알려야 한다
+      shockwave(this.motes, this.player.x, this.player.y, 420, 2.4, 2.0, 0.9, 1.4)
+      this.camera.shake(10, 5)
+      this.sfx('levelup')
+    }
+
+    // 막 끝 보스. 남은 20초는 잡고 정리할 여유다.
+    if (!this.bossSpawned && actProgressAt(this.elapsed) * ACT_SECONDS >= BOSS_AT) {
+      this.bossSpawned = true
+      this.spawnBoss()
+    }
+
+    // 보스가 죽었으면 표시를 지운다
+    if (this.bossIdx >= 0 && this.foes.alive[this.bossIdx] === 0) this.bossIdx = -1
+  }
+
+  /** 막의 가중치 표에서 종족 하나. */
+  private rollFoeType(act: ActDef): FoeType {
+    let total = 0
+    for (const e of act.weights) total += e.w
+    let r = this.rng.next() * total
+    for (const e of act.weights) {
+      r -= e.w
+      if (r < 0) return e.type
+    }
+    return Foe.Mote
+  }
+
+  /**
+   * 막 끝 보스. 잔챙이만 15분이면 지루하다 — 막마다 "이번 고비"가 있어야 한다.
+   * 보스는 같은 종족의 거대·고체력 개체다(별도 AI 를 만들면 hot loop 에 분기가 는다).
+   */
+  private spawnBoss(): void {
+    const act = ACTS[this.act]!
+    const hp = act.hp * 260 * (1 + this.act * 0.85)
+    const i = spawnRing(
+      this.foes, act.boss, this.player.x, this.player.y,
+      700, 820, hp / (FOE_STATS[act.boss]!.hp || 1), this.randFn, WORLD_R,
+    )
+    if (i < 0) return
+    this.bossIdx = i
+    this.bossMaxHp = this.foes.hp[i]!
+    // 보스는 화면에서 즉시 구분돼야 한다
+    shockwave(this.motes, this.foes.x[i]!, this.foes.y[i]!, 260, 2.8, 0.4, 0.6, 1.2)
+    burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 50, 2.8, 0.5, 0.7, 400, 1.0, 10, Shape.Crown)
+    this.camera.shake(18, 6)
+    this.sfx('evolve')
   }
 
   /**
@@ -350,6 +449,150 @@ export class Game implements FireCtx {
     this.camera.shake(amount, decay)
   }
 
+  placeField(kind: number, x: number, y: number, radius: number, power: number, life: number): void {
+    const slot = this.loadout.weapons.find((w) => FIELD_OWNER[kind] === w.def)
+    this.fields.spawn(kind, x, y, radius, power, life, slot?.evolved ?? false, this.rng.next())
+  }
+
+  pushFoes(x: number, y: number, radius: number, force: number): void {
+    const n = this.foesInRadius(x, y, radius, this.blastBuf)
+    for (let k = 0; k < n; k++) {
+      const j = this.blastBuf[k]!
+      if (this.foes.alive[j] === 0) continue
+      const dx = this.foes.x[j]! - x
+      const dy = this.foes.y[j]! - y
+      const d = Math.hypot(dx, dy) || 1
+      const stat = FOE_STATS[this.foes.type[j]!]!
+      // 거리에 반비례 — 우물 가까이가 제일 세다
+      const f = force * (1 - d / radius) * stat.weight
+      this.foes.pushX[j]! += (dx / d) * f
+      this.foes.pushY[j]! += (dy / d) * f
+    }
+  }
+
+  breakTerrain(x: number, y: number, radius: number, power: number): void {
+    const t = this.terrain
+    const cx0 = t.cellX(x - radius)
+    const cx1 = t.cellX(x + radius)
+    const cy0 = t.cellY(y - radius)
+    const cy1 = t.cellY(y + radius)
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        if (!t.inBounds(cx, cy)) continue
+        const wx = t.originX + cx * CELL + CELL * 0.5
+        const wy = t.originY + cy * CELL + CELL * 0.5
+        const dx = wx - x
+        const dy = wy - y
+        if (dx * dx + dy * dy > radius * radius) continue
+        if (t.damageCell(cx, cy, power, this.elapsed)) {
+          smoke(this.motes, wx, wy, 3, 1.5, 1.1, 0.85, 10)
+        }
+      }
+    }
+  }
+
+  // ── 지속 효과체 ──────────────────────────────────────────────────────
+
+  /**
+   * 중력정·신문·정지장·반향 한 틱.
+   * 필드는 512개 상한이라 이 루프 자체는 싸다 — 비싼 건 각 필드의 반경 질의다.
+   */
+  private updateFields(dt: number): void {
+    const f = this.fields
+    for (let i = 0; i < f.high; i++) {
+      if (f.alive[i] === 0) continue
+      const life = f.life[i]! - dt
+      const x = f.x[i]!
+      const y = f.y[i]!
+      const r = f.radius[i]!
+      const power = f.power[i]!
+      const evolved = f.evolved[i] === 1
+      const kind = f.kind[i]!
+
+      if (life <= 0) {
+        f.life[i] = 0
+        // 사라질 때 터지는 것들
+        if (kind === Field.Well && evolved) {
+          // 특이점 붕괴 — 삼킨 만큼 아프다
+          const blast = power * (2.5 + f.charge[i]! * 0.02)
+          this.explode(x, y, r * 1.5, blast, 1.6, 0.35, 2.9)
+          this.sfx('bigKill')
+          this.camera.shake(16, 8)
+        } else if (kind === Field.Echo) {
+          this.explode(x, y, r, power, 0.6, 2.0, 2.6)
+        }
+        f.kill(i)
+        continue
+      }
+      f.life[i] = life
+
+      switch (kind) {
+        case Field.Well: {
+          // 끌어당기고 갉는다
+          this.pushFoes(x, y, r, -520 * dt * 60)
+          const n = this.foesInRadius(x, y, r, this.fieldBuf)
+          for (let k = 0; k < n; k++) {
+            const j = this.fieldBuf[k]!
+            if (this.foes.alive[j] === 0) continue
+            this.damageFoe(j, power * dt, 0, 0)
+            f.charge[i]! += dt
+          }
+          break
+        }
+        case Field.Sigil: {
+          // 밟으면 터진다 — 적이 하나라도 안에 들어오면 발동
+          const n = this.foesInRadius(x, y, r * 0.6, this.fieldBuf)
+          if (n > 0) {
+            this.explode(x, y, r, power, 2.2, 1.9, 0.4)
+            this.sfx('kill')
+            f.kill(i)
+          }
+          break
+        }
+        case Field.Still: {
+          // 시간을 늦춘다. Foes.slow 를 되살리는 자리 —
+          // 적대 리뷰가 "영원히 1인 상수"라고 지적했던 그 필드다.
+          const n = this.foesInRadius(x, y, r, this.fieldBuf)
+          for (let k = 0; k < n; k++) {
+            const j = this.fieldBuf[k]!
+            if (this.foes.alive[j] === 0) continue
+            this.foes.slow[j] = evolved ? 0.12 : 0.3
+            // 영겁: 멈춘 것은 더 아프게 부서진다
+            if (evolved) this.foes.frail[j] = power
+          }
+          break
+        }
+      }
+    }
+  }
+
+  /**
+   * 반경 폭발 — 여러 무기가 공유하는 입구.
+   *
+   * 여기서 죽은 적이 반향을 낳고 그 반향이 또 explode 를 부른다(재귀).
+   * echoDepth 를 올려 두지 않으면 echoKill 의 상한이 무의미해진다 —
+   * 필드 순회 중 spreadBuf 를 재사용하는 것도 이 재귀 때문에 위험하므로
+   * 인덱스를 먼저 복사한 뒤 때린다.
+   */
+  private explode(
+    x: number, y: number, radius: number, damage: number,
+    cr: number, cg: number, cb: number,
+  ): void {
+    const n = this.foesInRadius(x, y, radius, this.blastBuf)
+    this.echoDepth++
+    for (let k = 0; k < n; k++) {
+      const j = this.blastBuf[k]!
+      if (this.foes.alive[j] === 0) continue
+      const dx = this.foes.x[j]! - x
+      const dy = this.foes.y[j]! - y
+      const d = Math.hypot(dx, dy) || 1
+      this.damageFoe(j, damage, dx / d, dy / d)
+    }
+    this.echoDepth--
+    shockwave(this.motes, x, y, radius, cr, cg, cb, 0.4)
+    burst(this.motes, x, y, 10, cr, cg, cb, radius * 2.4, 0.4, 5)
+  }
+
   private updateShots(dt: number): void {
     const shots = this.shots
     const foes = this.foes
@@ -369,14 +612,22 @@ export class Game implements FireCtx {
       shots.x[i] = x
       shots.y[i] = y
 
+      const w = shots.weapon[i]!
+      const isComet = (w & 127) === W.Comet
+
       // 지형: 내 공격도 벽을 판다. 엄폐물은 나에게도 벽이라는 뜻이고,
       // 그래서 "여길 뚫을까 돌아갈까"가 선택이 된다.
+      // 혜성만 예외 — 무거운 것은 벽을 뚫고 지나간다(그게 이 무기의 정체성이다).
       if (this.terrain.solidAt(x, y)) {
-        const broke = this.terrain.damageAt(x, y, shots.damage[i]! * 1.6, this.elapsed)
-        smoke(this.motes, x, y, broke ? 5 : 2, 1.5, 1.1, 0.85, broke ? 12 : 7)
-        if (broke) this.camera.shake(1.6, 20)
-        shots.kill(i)
-        continue
+        if (isComet) {
+          this.breakTerrain(x, y, shots.radius[i]! * 1.6, 40)
+        } else {
+          const broke = this.terrain.damageAt(x, y, shots.damage[i]! * 1.6, this.elapsed)
+          smoke(this.motes, x, y, broke ? 5 : 2, 1.5, 1.1, 0.85, broke ? 12 : 7)
+          if (broke) this.camera.shake(1.6, 20)
+          shots.kill(i)
+          continue
+        }
       }
 
       // 명중 판정 — stamp 는 탄이 태어날 때 받은 고유값이다.
@@ -397,9 +648,20 @@ export class Game implements FireCtx {
         this.foeStamp[j] = stamp
         this.damageFoe(j, shots.damage[i]!, shots.vx[i]!, shots.vy[i]!)
 
-        const w = shots.weapon[i]!
         if (isEvolvedShot(w) && (w & 127) === W.Ember) {
           this.ignite(j, shots.damage[i]! * 0.42)
+        }
+
+        // 혜성은 명중하면 터진다 — 관통이 99라 죽지 않으므로 여기서 끝낸다
+        if (isComet) {
+          const s2 = this.player.stats
+          const br = shots.radius[i]! * 5.5 * s2.blast
+          this.explode(x, y, br, shots.damage[i]! * 1.4, 2.6, 1.3, 0.5)
+          this.breakTerrain(x, y, br * 0.6, 60)
+          this.camera.shake(9, 10)
+          this.sfx('bigKill')
+          shots.kill(i)
+          break
         }
 
         if (shots.pierce[i]! <= 0) {
@@ -446,7 +708,7 @@ export class Game implements FireCtx {
   damageFoe(j: number, damage: number, fromVx: number, fromVy: number): void {
     const foes = this.foes
     const s = this.player.stats
-    let dmg = damage
+    let dmg = damage * foes.frail[j]!
     if (this.rng.next() < s.critChance) dmg *= s.critMult
 
     foes.hp[j]! -= dmg
@@ -488,6 +750,9 @@ export class Game implements FireCtx {
 
     foes.kill(j)
     this.player.kills++
+    // 반향 — 내가 부순 자리에서 소리가 되돌아온다
+    const echo = this.loadout.findWeapon(W.Echo)
+    if (echo) echoKill(echo, this, x, y, this.echoDepth)
   }
 
   // ── 드랍 ─────────────────────────────────────────────────────────────
@@ -540,7 +805,9 @@ export class Game implements FireCtx {
     if (leveled > 0) {
       this.pendingLevels += leveled
       this.phase = Phase.LevelUp
-      this.pendingChoices = this.loadout.roll(this.rng)
+      // 레벨 자체가 기초 스탯을 올린다 — 선택과 무관한 성장 축이라 여기서 재계산한다
+      this.loadout.recomputeStats(p)
+      this.pendingChoices = this.loadout.roll(this.rng, 3, p.stats.awaken)
       shockwave(this.motes, p.x, p.y, 70, 2.6, 2.2, 0.8, 0.5)
       burst(this.motes, p.x, p.y, 26, 2.6, 2.1, 0.7, 300, 0.7, 6, Shape.Star)
       this.camera.shake(5, 14)
@@ -561,10 +828,17 @@ export class Game implements FireCtx {
   render(renderer: Renderer): void {
     const cam = this.camera
     const view = cam.toView(renderer.width, renderer.height)
-    renderer.begin(view)
+    const t = this.visualTime
+
+    // 성운 색은 막을 따라 서서히 옮겨간다. 갑자기 바뀌면 이질적이라
+    // 3막쯤에서 "언제 이렇게 붉어졌지"가 되는 게 목표다.
+    const act = ACTS[this.act]!
+    renderer.cosmos.lerpTint(act.tintA, act.tintB, 0.02)
+    renderer.cosmos.intensity = Math.min(1, this.elapsed / RUN_SECONDS + this.act * 0.05)
+
+    renderer.begin(view, t)
 
     const b = renderer.batch
-    const t = this.visualTime
     const cullR = cam.visibleRadius(renderer.width, renderer.height)
     const cullR2 = cullR * cullR
     const cx = cam.x
@@ -649,6 +923,7 @@ export class Game implements FireCtx {
       const dy = y - cy
       if (dx * dx + dy * dy > cullR2) continue
 
+      const isBoss = i === this.bossIdx
       const stat = FOE_STATS[foes.type[i]!]!
       const flash = foes.flash[i]!
       // 맞은 순간 하얗게 뜬다. 이거 하나로 타격감이 산다.
@@ -658,14 +933,20 @@ export class Game implements FireCtx {
       const dim = 0.45 + hpFrac * 0.55
       // 불타는 적은 주황으로 물든다. 장작불 빌드가 화면에 보여야 재미가 있다.
       const fire = foes.burn[i]! > 0 ? 1 : 0
+      const size = isBoss ? stat.radius * 3.4 : stat.radius
       b.push(
-        x, y, stat.radius, foeRotation(foes, i, t),
+        x, y, size, foeRotation(foes, i, t),
         (stat.r + fire * 1.7) * hit * dim,
         (stat.g + fire * 0.55) * hit * dim,
         (stat.b * (1 - fire * 0.55)) * hit * dim,
         1,
         stat.shape,
       )
+      // 보스는 화면에서 즉시 구분돼야 한다 — 왕관과 도는 광륜
+      if (isBoss) {
+        b.push(x, y, size * 1.5, t * 0.7, 2.6, 1.6, 0.5, 1, Shape.Halo)
+        b.push(x, y + size * 1.3, size * 0.7, Math.sin(t * 2) * 0.12, 2.9, 2.2, 0.8, 1, Shape.Crown)
+      }
     }
 
     // 탄
@@ -712,12 +993,62 @@ export class Game implements FireCtx {
       )
     }
 
-    // 플레이어 — 마지막에 그려서 무슨 일이 있어도 자기 캐릭터는 보이게
+    // 지속 효과체 — 적 위, 플레이어 아래
+    const f = this.fields
+    for (let i = 0; i < f.high; i++) {
+      if (f.alive[i] === 0) continue
+      const x = f.x[i]!
+      const y = f.y[i]!
+      const dx = x - cx
+      const dy = y - cy
+      if (dx * dx + dy * dy > cullR2) continue
+      const r = f.radius[i]!
+      const frac = f.life[i]! / f.maxLife[i]!
+      const evo = f.evolved[i] === 1
+      const seed = f.seed[i]!
+
+      switch (f.kind[i]!) {
+        case Field.Well: {
+          // 특이점은 가운데가 비어 보여야 한다 — Singularity 모양이 그 일을 한다
+          const spin = t * (evo ? 3.4 : 1.8) + seed * 6.283
+          const pulse = 1 + Math.sin(t * 7 + seed * 10) * 0.06
+          b.push(x, y, r * 0.55 * pulse, spin, 1.5, 0.5, 3.0, 1, Shape.Singularity)
+          b.push(x, y, r * 0.95, -spin * 0.5, 0.7, 0.2, 1.5, 1, Shape.Vortex)
+          if (evo) {
+            // 삼킨 만큼 밝아진다 — 곧 터진다는 신호
+            const charge = Math.min(1, f.charge[i]! * 0.02)
+            b.push(x, y, r * 0.4 * (1 + charge), spin * 2, 2.8 * charge, 0.6 * charge, 3.4 * charge, 1, Shape.Nova)
+          }
+          break
+        }
+        case Field.Sigil: {
+          const a = 0.35 + frac * 0.65
+          b.push(x, y, r * 1.1, seed * 6.283 + t * 0.4, 2.2 * a, 1.9 * a, 0.5 * a, 1, Shape.Sigil)
+          if (evo) b.push(x, y, r * 0.5, -t * 1.2, 2.4 * a, 2.0 * a, 0.6 * a, 1, Shape.Rune)
+          break
+        }
+        case Field.Still: {
+          // 정지장은 시간이 멎은 느낌이라 아주 천천히 돈다
+          const a = 0.3 + frac * 0.5
+          b.push(x, y, r * 1.05, t * 0.25 + seed, 0.5 * a, 1.4 * a, 2.9 * a, 1, Shape.Halo)
+          b.push(x, y, r * 0.7, -t * 0.18, 0.3 * a, 0.9 * a, 2.2 * a, 1, Shape.Ring)
+          break
+        }
+        case Field.Echo: {
+          const grow = 2 - frac
+          b.push(x, y, r * grow, seed * 6.283, 0.6 * frac, 2.0 * frac, 2.6 * frac, 1, Shape.Rift)
+          break
+        }
+      }
+    }
+
+    // 플레이어 — 마지막에 그려서 무슨 일이 있어도 자기 캐릭터는 보이게.
+    // 꺼져가는 별의 마지막 불씨: 씨앗 코어 + 도는 광륜.
     const p = this.player
     if (p.alive) {
       const inv = p.invuln > 0 ? 0.45 + Math.sin(t * 40) * 0.3 : 1
-      b.push(p.x, p.y, 30, -t * 0.9, 0.9 * inv, 1.5 * inv, 2.8 * inv, 1, Shape.Ring)
-      b.push(p.x, p.y, 15, t * 2.2, 2.6 * inv, 2.2 * inv, 3.4 * inv, 1, Shape.Orb)
+      b.push(p.x, p.y, 34, t * 0.5, 0.7 * inv, 1.2 * inv, 2.4 * inv, 1, Shape.Halo)
+      b.push(p.x, p.y, 20, -t * 1.4, 2.9 * inv, 2.3 * inv, 3.4 * inv, 1, Shape.Seed)
     }
 
     renderer.end(t, p.hurtFlash)
