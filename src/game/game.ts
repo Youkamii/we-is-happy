@@ -19,6 +19,7 @@ import {
 } from '../engine/palette'
 import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
+import { drawHealthRing, drawOffscreenMarker, drawXpArc } from './hud3d'
 import { FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
 import { Loadout, type Choice } from './loadout'
 import { Player } from './player'
@@ -1076,8 +1077,25 @@ export class Game implements FireCtx {
       b.push(p.x, p.y, 42, t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
       b.push(p.x, p.y, 26, -t * 1.4, PLAYER_BASE * inv, PLAYER_BASE * 0.85 * inv, PLAYER_BASE * 1.2 * inv, 1, Shape.Seed)
       b.push(p.x, p.y, 15, t * 3.1, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, 1, Shape.Nova)
+
+      // 목숨과 관련된 건 전부 몸에 붙인다 — 시선이 이미 거기 있으니까.
+      // 좌상단 8px "HP 49%" 는 후반에 아무도 안 읽는다.
+      drawHealthRing(b, p.x, p.y, p.hp / p.stats.maxHp, t)
+      drawXpArc(b, p.x, p.y, p.xp / p.xpNeeded)
+
+      // 화면 밖 보스 — 어디서 오는지 모르면 "갑자기 죽었다"가 된다
+      if (this.bossIdx >= 0 && foes.alive[this.bossIdx] === 1) {
+        drawOffscreenMarker(
+          b, cam.x, cam.y, 1 / view.sx, 1 / view.sy,
+          foes.x[this.bossIdx]!, foes.y[this.bossIdx]!,
+          ACCENT, 0.5, 0.2, t,
+        )
+      }
     }
 
-    renderer.end(t, p.hurtFlash)
+    // 체력 30% 아래부터 화면이 조여든다. 숫자를 읽지 않아도 "죽는다"가 느껴져야 한다.
+    const hpFrac = p.alive ? p.hp / p.stats.maxHp : 0
+    const danger = p.alive ? Math.max(0, 1 - hpFrac / 0.3) : 0
+    renderer.end(t, p.hurtFlash, danger)
   }
 }

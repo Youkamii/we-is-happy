@@ -89,9 +89,9 @@ export class Renderer {
   }
 
   /** 배치를 뱉고 포스트 체인을 태워 화면에 올린다. */
-  end(time: number, hurt = 0): void {
+  end(time: number, hurt = 0, danger = 0): void {
     this.batch.end()
-    this.bloom.render(this.scene.tex, this.width, this.height, time, hurt)
+    this.bloom.render(this.scene.tex, this.width, this.height, time, hurt, danger)
   }
 
   get aspect(): number {

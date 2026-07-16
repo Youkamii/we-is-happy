@@ -106,6 +106,7 @@ uniform sampler2D u_bloom;
 uniform float u_bloomStrength;
 uniform float u_time;
 uniform float u_hurt;       // 피격 플래시 0..1
+uniform float u_danger;     // 0..1 — 체력이 바닥일수록 1. 심박 비네트.
 uniform float u_aberration;
 uniform float u_grain;
 uniform float u_vignette;
@@ -154,6 +155,17 @@ void main() {
   // 절대 침범하지 않는다. 체력은 HUD 숫자가 알려주는 게 정확하고, 이건 보조다.
   float rim = smoothstep(0.16, 0.30, r2);
   color = mix(color, vec3(1.2, 0.05, 0.04), u_hurt * rim * 0.5);
+
+  // 심박 — 체력이 바닥이면 화면 테두리가 뛴다.
+  // 이건 "맞았다"(순간)가 아니라 "죽는다"(상태)라서 다른 신호여야 한다. 붉은 필터를
+  // 씌우면 정작 피할 것이 안 보이므로, 밝기를 **빼는** 방향으로 판다 —
+  // 시야가 좁아지는 느낌이 곧 위험이다.
+  if (u_danger > 0.001) {
+    float beat = 0.72 + 0.28 * sin(u_time * 6.0);
+    float squeeze = smoothstep(0.05, 0.26, r2) * u_danger * beat;
+    color *= 1.0 - squeeze * 0.72;
+    color += vec3(0.5, 0.02, 0.03) * squeeze * 0.5;
+  }
 
   color = aces(color);
 
@@ -255,7 +267,10 @@ export class BloomPass {
    * sceneTex(HDR) 를 받아 최종 화면(기본 프레임버퍼)에 합성한다.
    * hurt 는 0..1 피격 강도, time 은 그레인 애니메이션용.
    */
-  render(sceneTex: WebGLTexture, screenW: number, screenH: number, time: number, hurt: number): void {
+  render(
+    sceneTex: WebGLTexture, screenW: number, screenH: number,
+    time: number, hurt: number, danger = 0,
+  ): void {
     const gl = this.gl
     const s = this.settings
     gl.disable(gl.BLEND)
@@ -313,6 +328,7 @@ export class BloomPass {
     gl.uniform1f(this.composite.uniforms['u_bloomStrength']!, s.strength)
     gl.uniform1f(this.composite.uniforms['u_time']!, time)
     gl.uniform1f(this.composite.uniforms['u_hurt']!, hurt)
+    gl.uniform1f(this.composite.uniforms['u_danger']!, danger)
     gl.uniform1f(this.composite.uniforms['u_aberration']!, s.aberration)
     gl.uniform1f(this.composite.uniforms['u_grain']!, s.grain)
     gl.uniform1f(this.composite.uniforms['u_vignette']!, s.vignette)
