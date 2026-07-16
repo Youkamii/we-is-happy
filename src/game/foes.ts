@@ -38,7 +38,7 @@ export interface FoeStat {
  */
 export const FOE_STATS: readonly FoeStat[] = [
   // Mote — 청록. 잔챙이. 화면을 채우는 물량.
-  { speed: 62, radius: 9, hp: 4, damage: 6, xp: 1, r: 0.25, g: 1.5, b: 1.9, shape: Shape.Mote, sep: 17, behavior: Behavior.Chase, weight: 1 },
+  { speed: 90, radius: 11, hp: 4, damage: 6, xp: 1, r: 0.3, g: 1.7, b: 2.1, shape: Shape.Mote, sep: 19, behavior: Behavior.Chase, weight: 1 },
   // Husk — 주황. 돌진. 방심하면 뒤통수를 친다.
   { speed: 132, radius: 12, hp: 9, damage: 12, xp: 3, r: 2.4, g: 0.85, b: 0.2, shape: Shape.Husk, sep: 21, behavior: Behavior.Dash, weight: 0.85 },
   // Hex — 보라. 탱커. 벽처럼 밀고 들어온다.
@@ -241,7 +241,45 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
   return result
 }
 
-/** 링 밖 랜덤 위치. 화면 밖에서 걸어 들어오게 만든다. */
+/**
+ * 무리 스폰. 잔챙이를 낱개로 흩뿌리면 군체가 아니라 점묘화가 된다 —
+ * 한 덩어리로 몰려와야 "밀려온다"가 된다.
+ */
+export function spawnCluster(
+  foes: Foes,
+  type: FoeType,
+  cx: number,
+  cy: number,
+  ringMin: number,
+  ringMax: number,
+  hpScale: number,
+  count: number,
+  spread: number,
+  rand: () => number,
+  worldR: number,
+): number {
+  const a = rand() * Math.PI * 2
+  const d = ringMin + rand() * (ringMax - ringMin)
+  let bx = cx + Math.cos(a) * d
+  let by = cy + Math.sin(a) * d
+  if (Math.hypot(bx, by) > worldR * 0.97) {
+    bx = cx - Math.cos(a) * d
+    by = cy - Math.sin(a) * d
+  }
+  const stat = FOE_STATS[type]!
+  let spawned = 0
+  for (let k = 0; k < count; k++) {
+    // 원 안 균일 분포 (sqrt 없이 그냥 뿌리면 가운데에 뭉친다)
+    const ang = rand() * Math.PI * 2
+    const r = Math.sqrt(rand()) * spread
+    const i = foes.spawn(bx + Math.cos(ang) * r, by + Math.sin(ang) * r, type, stat.hp * hpScale, rand())
+    if (i < 0) break
+    spawned++
+  }
+  return spawned
+}
+
+/** 링 밖 랜덤 위치 한 마리. */
 export function spawnRing(
   foes: Foes,
   type: FoeType,

@@ -149,16 +149,21 @@ export class Player {
     return true
   }
 
-  /** 레벨업 했으면 true. XP 곡선은 완만하게 — 5분 안에 12~16레벨이 목표. */
-  gainXp(amount: number): boolean {
+  /**
+   * 오른 레벨 수를 반환한다. XP 곡선은 완만하게 — 5분에 12~16레벨이 목표.
+   * 한 번에 여러 레벨이 오를 수 있다(자석으로 XP 를 한꺼번에 빨아들일 때).
+   * 한 레벨만 올리면 나머지 XP 가 조용히 증발한다.
+   */
+  gainXp(amount: number): number {
     this.xp += amount * this.stats.greed
-    if (this.xp >= this.xpNeeded) {
+    let gained = 0
+    while (this.xp >= this.xpNeeded) {
       this.xp -= this.xpNeeded
       this.level++
       this.xpNeeded = Math.floor(5 + this.level * 3.1 + this.level * this.level * 0.42)
-      return true
+      gained++
     }
-    return false
+    return gained
   }
 
   heal(amount: number): void {

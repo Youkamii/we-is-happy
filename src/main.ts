@@ -6,6 +6,8 @@ import { Input } from './engine/input'
 import { Renderer } from './engine/renderer'
 import { dailySeed, hashSeed } from './engine/rng'
 import { Game, Phase, RUN_SECONDS } from './game/game'
+import { LevelUpUI } from './ui/levelup'
+import { WEAPONS } from './game/weapons'
 
 function fatal(msg: string): void {
   const el = document.getElementById('fatal')
@@ -42,6 +44,7 @@ function boot(): void {
   if (bench > 0) game.benchSpawn(bench)
 
   const ui = document.getElementById('ui')!
+  const levelUp = new LevelUpUI(ui)
   const hud = document.createElement('div')
   hud.style.cssText =
     'position:absolute;top:14px;left:16px;font:600 13px/1.7 ui-monospace,monospace;' +
@@ -76,11 +79,14 @@ function boot(): void {
 
     input.update()
 
-    // 레벨업 3택은 #6. 지금은 즉시 재개해서 5분 완주가 가능한지부터 본다.
-    if (game.phase === Phase.LevelUp) game.phase = Phase.Playing
+    // 레벨업: 선택지가 떠 있는 동안 시뮬레이션은 멈춘다 (game.update 가 알아서 건너뛴다)
+    if (game.phase === Phase.LevelUp && !levelUp.isVisible && game.pendingChoices.length > 0) {
+      levelUp.show(game.pendingChoices, game.player.level, (c) => game.choose(c))
+    }
 
     if (game.phase === Phase.Dead || game.phase === Phase.Won) {
       if (input.consumePressed('r')) {
+        levelUp.hide()
         game.start(seed)
         if (bench > 0) game.benchSpawn(bench)
       }
@@ -92,10 +98,17 @@ function boot(): void {
 
     const p = game.player
     const hpPct = Math.round((p.hp / p.stats.maxHp) * 100)
+    const gear = game.loadout.weapons
+      .map((w) => {
+        const d = WEAPONS[w.def]!
+        return `${w.evolved ? `${d.evoName}★` : d.name}${w.level}`
+      })
+      .join(' ')
     hud.textContent =
       `${fmtTime(RUN_SECONDS - game.elapsed)}  남음\n` +
       `HP ${hpPct}%   Lv ${p.level}\n` +
       `처치 ${p.kills.toLocaleString()}\n` +
+      `${gear}\n` +
       `\n` +
       `적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}  입자 ${game.motes.count.toLocaleString()}\n` +
       `fps ${fps.toFixed(0)}`
