@@ -129,7 +129,9 @@ export class Player {
     }
 
     if (this.invuln > 0) this.invuln -= dt
-    if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt * 3.2)
+    // 빠르게 뺀다. 적에 둘러싸이면 피격이 매번 리셋돼서 화면이 계속 빨갛고,
+    // 그러면 정작 피해야 할 적이 안 보인다.
+    if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt * 5.5)
     if (s.regen > 0 && this.hp < s.maxHp) {
       this.hp = Math.min(s.maxHp, this.hp + s.regen * dt)
     }

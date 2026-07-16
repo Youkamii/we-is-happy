@@ -126,7 +126,7 @@ void main() {
   float r2 = dot(fromCenter, fromCenter);
 
   // 색수차 — 화면 가장자리로 갈수록 채널이 어긋난다. 피격 시 더 심해진다.
-  float ab = u_aberration * (0.4 + u_hurt * 2.5) * r2;
+  float ab = u_aberration * (0.4 + u_hurt * 1.4) * r2;
   vec3 scene;
   if (ab > 0.0001) {
     scene.r = texture(u_scene, uv - fromCenter * ab).r;
@@ -139,8 +139,10 @@ void main() {
   vec3 bloom = texture(u_bloom, uv).rgb;
   vec3 color = scene + bloom * u_bloomStrength;
 
-  // 피격 시 붉게 물듦
-  color = mix(color, vec3(1.4, 0.12, 0.1), u_hurt * 0.42);
+  // 피격 시 붉게 물듦. 화면 전체를 덮으면 정작 피해야 할 적이 안 보이므로
+  // 가장자리(비네트 쪽)만 강하게 물들이고 가운데는 살려 둔다.
+  float hurtMask = u_hurt * (0.16 + smoothstep(0.02, 0.22, r2) * 0.46);
+  color = mix(color, vec3(1.5, 0.1, 0.08), hurtMask);
 
   color = aces(color);
 

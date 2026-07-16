@@ -7,6 +7,7 @@
 import type { SpatialHash } from '../engine/grid'
 import { Shape } from '../engine/shapes'
 import { Foe, type FoeType, type Foes } from './pools'
+import type { Terrain } from './terrain'
 
 export const Behavior = {
   Chase: 0, // 플레이어를 향해 꾸준히
@@ -30,23 +31,36 @@ export interface FoeStat {
   readonly behavior: number
   /** 넉백 저항 (1 = 그대로 밀림, 0 = 요지부동) */
   readonly weight: number
+  /** 지형을 갉아먹는 초당 피해. 큰 놈일수록 벽을 빨리 뚫는다. */
+  readonly gnaw: number
 }
 
 /**
  * 색은 HDR 이라 1을 넘긴다. 넘긴 만큼 bloom 이 문다.
  * 종류를 색으로 구분해야 화면에 2만 마리가 있어도 무엇이 위험한지 읽힌다.
  */
+/**
+ * 속도 설계 — 이 게임의 밸런스 전부가 여기 걸려 있다.
+ *
+ * 플레이어는 238이다. 처음엔 잔챙이를 90으로 뒀는데, 봇 6판이 전부 5분을 완주했고
+ * 그중 셋은 0~4킬이었다. 2.6배 빠르면 도망이 무적 전략이 되고, 월드가 5200 이라
+ * 도망칠 공간도 무한하다. 그건 게임이 아니라 산책이다.
+ *
+ * 지금은 잔챙이가 플레이어의 62%다. 도망은 여전히 통하지만 영원히는 아니고,
+ * 뒤에 꼬리가 쌓인다. 돌진체(Husk)는 순간 2.35배로 튀므로 실질 최고 속도가
+ * 플레이어를 넘는다 — 도망만 치면 뒤통수를 맞으라는 뜻이다.
+ */
 export const FOE_STATS: readonly FoeStat[] = [
   // Mote — 청록. 잔챙이. 화면을 채우는 물량.
-  { speed: 90, radius: 11, hp: 4, damage: 6, xp: 1, r: 0.3, g: 1.7, b: 2.1, shape: Shape.Mote, sep: 19, behavior: Behavior.Chase, weight: 1 },
-  // Husk — 주황. 돌진. 방심하면 뒤통수를 친다.
-  { speed: 132, radius: 12, hp: 9, damage: 12, xp: 3, r: 2.4, g: 0.85, b: 0.2, shape: Shape.Husk, sep: 21, behavior: Behavior.Dash, weight: 0.85 },
-  // Hex — 보라. 탱커. 벽처럼 밀고 들어온다.
-  { speed: 42, radius: 19, hp: 46, damage: 18, xp: 8, r: 1.5, g: 0.5, b: 2.3, shape: Shape.Hex, sep: 34, behavior: Behavior.Chase, weight: 0.35 },
+  { speed: 148, radius: 11, hp: 4, damage: 6, xp: 1, r: 0.3, g: 1.7, b: 2.1, shape: Shape.Mote, sep: 19, behavior: Behavior.Chase, weight: 1, gnaw: 7 },
+  // Husk — 주황. 돌진. 방심하면 뒤통수를 친다. (버스트 시 실속도 190*2.35)
+  { speed: 190, radius: 12, hp: 9, damage: 12, xp: 3, r: 2.4, g: 0.85, b: 0.2, shape: Shape.Husk, sep: 21, behavior: Behavior.Dash, weight: 0.85, gnaw: 14 },
+  // Hex — 보라. 탱커. 느리지만 벽처럼 밀고 들어온다.
+  { speed: 88, radius: 19, hp: 46, damage: 18, xp: 8, r: 1.5, g: 0.5, b: 2.3, shape: Shape.Hex, sep: 34, behavior: Behavior.Chase, weight: 0.35, gnaw: 40 },
   // Wisp — 연두. 주위를 돌며 거리를 잰다. 몰리면 도망칠 길이 막힌다.
-  { speed: 96, radius: 10, hp: 14, damage: 9, xp: 4, r: 0.7, g: 2.2, b: 0.6, shape: Shape.Orb, sep: 24, behavior: Behavior.Orbit, weight: 0.7 },
+  { speed: 152, radius: 10, hp: 14, damage: 9, xp: 4, r: 0.7, g: 2.2, b: 0.6, shape: Shape.Orb, sep: 24, behavior: Behavior.Orbit, weight: 0.7, gnaw: 9 },
   // Eye — 적색. 엘리트. 드물고 아프고 많이 준다.
-  { speed: 74, radius: 27, hp: 190, damage: 26, xp: 40, r: 2.6, g: 0.3, b: 0.45, shape: Shape.Eye, sep: 48, behavior: Behavior.Chase, weight: 0.15 },
+  { speed: 132, radius: 27, hp: 190, damage: 26, xp: 40, r: 2.6, g: 0.3, b: 0.45, shape: Shape.Eye, sep: 48, behavior: Behavior.Chase, weight: 0.15, gnaw: 95 },
 ]
 
 /** 이웃을 몇 마리까지 보고 끊을지. 밀집 구간에서 이게 없으면 O(n²)로 돌아간다. */
@@ -68,6 +82,8 @@ export interface FoeUpdateCtx {
    * 순회 중 풀을 건드리면 free 스택과 인덱스가 꼬인다.
    */
   readonly deadOut: Int32Array
+  /** 지형. 적은 길을 찾지 않고 갉아먹는다. */
+  readonly terrain: Terrain | null
 }
 
 export interface FoeUpdateResult {
@@ -80,9 +96,12 @@ export interface FoeUpdateResult {
 /** 프레임당 1회만 만들어지므로 객체 반환이 GC 를 건드리지 않는다. */
 const result: FoeUpdateResult = { contactDamage: 0, deadCount: 0 }
 
+/** resolveCircle 결과를 받는 스크래치. 프레임당 수만 번 불리므로 재사용한다. */
+const scratch = new Float32Array(2)
+
 /** 군체 한 틱. */
 export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateResult {
-  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut } = ctx
+  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain } = ctx
   let deadCount = 0
   const high = foes.high
   const alive = foes.alive
@@ -218,6 +237,20 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
       const inv = worldR / Math.sqrt(rr)
       nx *= inv
       ny *= inv
+    }
+
+    // ── 지형: 길을 찾지 않고 갉아먹는다.
+    // 2만 마리에 경로탐색은 불가능하고, 파괴로 풀면 오히려 전술이 생긴다.
+    if (terrain !== null && terrain.solidAt(nx, ny)) {
+      // 진행 방향 앞쪽 셀을 문다
+      terrain.damageAt(nx + dx * stat.radius, ny + dy * stat.radius, stat.gnaw * dt, time)
+      if (terrain.resolveCircle(nx, ny, stat.radius, scratch)) {
+        nx = scratch[0]!
+        ny = scratch[1]!
+        // 벽에 부딪힌 속도는 죽인다 — 안 그러면 벽을 타고 미끄러지며 떤다
+        vxs[i] = vx * 0.25
+        vys[i] = vy * 0.25
+      }
     }
 
     xs[i] = nx

@@ -9,6 +9,11 @@ import { dailySeed, hashSeed } from './engine/rng'
 import { Game, Phase, RUN_SECONDS } from './game/game'
 import { LevelUpUI } from './ui/levelup'
 import { WEAPONS } from './game/weapons'
+import { loadRecords, makeResult, saveRecord, type RunResult } from './game/score'
+
+const GRADE_COLOR: Record<string, string> = {
+  'S+': '#ffe27a', S: '#ffd166', A: '#8affc1', B: '#7de3ff', C: '#b9c6d6', D: '#8d9aab', E: '#6b7787',
+}
 
 function fatal(msg: string): void {
   const el = document.getElementById('fatal')
@@ -47,6 +52,8 @@ function boot(): void {
   const daily = dailySeed(new Date())
   const seedParam = params.get('seed')
   const seed = seedParam ? hashSeed(seedParam) : daily.seed
+  // 기록은 시드별로 남는다. 데일리는 날짜가 곧 라벨이라 매일 새 판이 열린다.
+  const seedLabel = seedParam ? `seed:${seedParam}` : daily.label
   game.start(seed)
 
   // ?bench=10000 — 적을 즉시 N마리 풀어 성능만 본다.
@@ -70,8 +77,8 @@ function boot(): void {
   const center = document.createElement('div')
   center.style.cssText =
     'position:absolute;inset:0;display:grid;place-content:center;text-align:center;' +
-    'font:700 30px/1.5 ui-monospace,monospace;color:#ffd9a8;' +
-    'text-shadow:0 0 24px rgba(255,140,40,.8);white-space:pre;'
+    'font:700 30px/1.4 ui-monospace,monospace;color:#ffd9a8;' +
+    'text-shadow:0 0 24px rgba(255,140,40,.55);'
   ui.appendChild(center)
 
   let last = performance.now()
@@ -79,6 +86,9 @@ function boot(): void {
   let frames = 0
   let fps = 0
   let worstFrame = 0
+  let result: RunResult | null = null
+  let records = loadRecords()
+  let isBest = false
 
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 0.25)
@@ -108,8 +118,17 @@ function boot(): void {
     }
 
     if (game.phase === Phase.Dead || game.phase === Phase.Won) {
+      // 결과는 판이 끝난 순간 딱 한 번 확정한다 (매 프레임 저장하면 기록이 뻥튀기된다)
+      if (!result) {
+        result = makeResult(game, seedLabel)
+        const saved = saveRecord(result)
+        records = saved.records
+        isBest = saved.isBest
+      }
       if (input.consumePressed('r')) {
         levelUp.hide()
+        result = null
+        isBest = false
         game.start(seed)
         if (bench > 0) game.benchSpawn(bench)
       }
@@ -147,12 +166,28 @@ function boot(): void {
       `적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}  입자 ${game.motes.count.toLocaleString()}\n` +
       `fps ${fps.toFixed(0)}`
 
-    if (game.phase === Phase.Dead) {
-      center.textContent = `꺼졌다\n\n${fmtTime(game.elapsed)} 버팀 · ${p.kills.toLocaleString()} 처치\n\nR — 다시`
-    } else if (game.phase === Phase.Won) {
-      center.textContent = `버텨냈다\n\n${p.kills.toLocaleString()} 처치\n\nR — 다시`
+    if (result) {
+      const prevBest = records.best[seedLabel] ?? 0
+      // 뒤에서 화면이 계속 불타고 있어서 오버레이 없이는 글자가 안 읽힌다.
+      center.style.background = 'radial-gradient(ellipse at center,rgba(4,6,12,.86),rgba(2,3,7,.97))'
+      center.style.backdropFilter = 'blur(3px)'
+      center.innerHTML =
+        `<div style="font-size:38px;letter-spacing:.14em">${result.won ? '버텨냈다' : '꺼졌다'}</div>` +
+        `<div style="margin-top:18px;font-size:74px;line-height:1;color:${GRADE_COLOR[result.grade] ?? '#ffd9a8'}">${result.grade}</div>` +
+        `<div style="margin-top:10px;font-size:26px">${result.score.toLocaleString()}</div>` +
+        (isBest
+          ? '<div style="margin-top:6px;font-size:14px;color:#8affc1">이 시드 신기록</div>'
+          : `<div style="margin-top:6px;font-size:14px;color:#7d90a8">최고 ${prevBest.toLocaleString()}</div>`) +
+        `<div style="margin-top:22px;font-size:14px;color:#a9bdd4;line-height:1.9">` +
+        `${fmtTime(result.survived)} 버팀 · ${result.kills.toLocaleString()} 처치 · Lv ${result.level}<br>` +
+        `${result.weapons.join(' · ') || '맨손'}<br>` +
+        `<span style="color:#6f8299">${seedLabel}</span>` +
+        `</div>` +
+        `<div style="margin-top:24px;font-size:15px;color:#ffb066">R — 다시</div>`
     } else {
-      center.textContent = ''
+      center.style.background = 'none'
+      center.style.backdropFilter = 'none'
+      center.innerHTML = ''
     }
 
     input.endFrame()

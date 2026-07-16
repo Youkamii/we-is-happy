@@ -11,10 +11,11 @@ import type { Input } from '../engine/input'
 import type { Renderer } from '../engine/renderer'
 import { Rng } from '../engine/rng'
 import { Shape } from '../engine/shapes'
-import { burst, shockwave, spray, updateMotes } from './fx'
+import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
 import { Loadout, type Choice } from './loadout'
 import { Player } from './player'
+import { CELL, Terrain } from './terrain'
 import { Drop, Drops, Foe, Foes, Motes, Shots, type FoeType } from './pools'
 import { isEvolvedShot, tickWeapon, W, WEAPONS, type FireCtx } from './weapons'
 
@@ -48,6 +49,7 @@ export class Game implements FireCtx {
   readonly camera = new Camera()
   readonly loadout = new Loadout()
   readonly hash = new SpatialHash(-WORLD_R, -WORLD_R, WORLD_R * 2, WORLD_R * 2, 52, MAX_FOES)
+  readonly terrain = new Terrain(WORLD_R)
 
   rng = new Rng(1)
   private acc = 0
@@ -62,6 +64,8 @@ export class Game implements FireCtx {
   private readonly spreadBuf = new Int32Array(64)
   /** 스폰 함수에 넘길 난수원. 매 스폰마다 클로저를 새로 만들지 않으려고 붙잡아 둔다. */
   private readonly randFn = (): number => this.rng.next()
+  /** 지형 충돌 결과를 받는 스크래치 */
+  private readonly hit2 = new Float32Array(2)
 
   phase: PhaseType = Phase.Playing
   elapsed = 0
@@ -105,6 +109,8 @@ export class Game implements FireCtx {
     this.phase = Phase.Playing
     this.pendingChoices = []
     this.pendingLevels = 0
+    // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
+    this.terrain.generate(seed, WORLD_R, 1)
     // 시작 무기는 시드로 정한다 — 매판 다른 빌드로 출발한다
     this.loadout.reset(this.rng.int(WEAPONS.length))
     this.loadout.recomputeStats(this.player)
@@ -165,6 +171,11 @@ export class Game implements FireCtx {
     this.elapsed += dt
 
     this.player.update(input.move, dt, WORLD_R)
+    // 지형은 플레이어를 막는다 (적은 갉아먹고 지나간다)
+    if (this.terrain.resolveCircle(this.player.x, this.player.y, this.player.radius, this.hit2)) {
+      this.player.x = this.hit2[0]!
+      this.player.y = this.hit2[1]!
+    }
 
     const res = updateFoes(
       {
@@ -176,6 +187,7 @@ export class Game implements FireCtx {
         time: this.elapsed,
         worldR: WORLD_R,
         deadOut: this.deadBuf,
+        terrain: this.terrain,
       },
       this.player.radius,
     )
@@ -333,6 +345,16 @@ export class Game implements FireCtx {
       const y = shots.y[i]! + shots.vy[i]! * dt
       shots.x[i] = x
       shots.y[i] = y
+
+      // 지형: 내 공격도 벽을 판다. 엄폐물은 나에게도 벽이라는 뜻이고,
+      // 그래서 "여길 뚫을까 돌아갈까"가 선택이 된다.
+      if (this.terrain.solidAt(x, y)) {
+        const broke = this.terrain.damageAt(x, y, shots.damage[i]! * 1.6, this.elapsed)
+        smoke(this.motes, x, y, broke ? 5 : 2, 1.5, 1.1, 0.85, broke ? 12 : 7)
+        if (broke) this.camera.shake(1.6, 20)
+        shots.kill(i)
+        continue
+      }
 
       // 명중 판정 — 이 탄이 이번에 때린 적을 표시하는 스탬프
       const stamp = ++this.hitStamp
@@ -513,6 +535,37 @@ export class Game implements FireCtx {
     const cullR2 = cullR * cullR
     const cx = cam.x
     const cy = cam.y
+
+    // 지형 — 화면에 걸치는 셀만. 격자 전체(130x130)를 매 프레임 돌 이유가 없다.
+    const ter = this.terrain
+    const tx0 = ter.cellX(cx - cullR)
+    const tx1 = ter.cellX(cx + cullR)
+    const ty0 = ter.cellY(cy - cullR)
+    const ty1 = ter.cellY(cy + cullR)
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let txi = tx0; txi <= tx1; txi++) {
+        if (!ter.inBounds(txi, ty)) continue
+        const ci = ty * ter.cols + txi
+        const hp = ter.hp[ci]!
+        if (hp <= 0) continue
+        const wx = ter.originX + txi * CELL + CELL * 0.5
+        const wy = ter.originY + ty * CELL + CELL * 0.5
+        const frac = hp / ter.maxHp[ci]!
+        // 닳으면 어두워지고 갈라진다 — 얼마나 버틸지 눈으로 보여야 한다
+        const recent = this.elapsed - ter.flash[ci]!
+        const lit = recent < 0.12 ? 1.9 : 1
+        const v = 0.1 + frac * 0.24
+        const tint = ter.tint[ci]!
+        // 속을 채우고 테두리를 얹는다. 속 빈 육각만 그리면 벌집처럼 보여서
+        // "벽"이 아니라 "뚫린 곳"으로 읽힌다.
+        b.push(wx, wy, CELL * 0.74, 0, v * 0.3 * lit, v * 0.26 * lit, v * 0.5 * lit, 1, Shape.Hex)
+        b.push(
+          wx, wy, CELL * 0.6, 0,
+          (v + tint * 0.05) * lit, (v * 0.92) * lit, (v * 1.5 + 0.06) * lit, 1,
+          frac < 0.45 ? Shape.Crack : Shape.Hex,
+        )
+      }
+    }
 
     // 월드 경계 — 벽처럼 보여야 한다.
     // 원 전체를 균등 분할하면 반경 2600에서 조각 간격이 170px 라 점선이 된다.
