@@ -9,6 +9,7 @@
 import type { SfxName } from '../engine/audio'
 import type { SpatialHash } from '../engine/grid'
 import type { Rng } from '../engine/rng'
+import { ACCENT, FX_BASE } from '../engine/palette'
 import { Shape } from '../engine/shapes'
 import { spray } from './fx'
 import type { Player } from './player'
@@ -94,78 +95,82 @@ export interface WeaponDef {
   readonly maxLevel: number
 }
 
+/**
+ * 색은 **1.0 을 넘지 않는다** (palette.ts). 진화형만 shotColor 계산에서 조금 넘긴다 —
+ * 그게 "진화했다"를 화면으로 알리는 유일한 수단이라 특권을 거기 몰아준다.
+ */
 export const WEAPONS: readonly WeaponDef[] = [
   {
     id: W.Ember, name: '불씨', desc: '가장 가까운 적에게 자동으로 쏜다',
     evoName: '장작불', evoDesc: '맞은 적이 불탄다. 불은 옆으로 옮겨붙는다',
     evoPassive: P.Might, cooldown: 0.34,
-    r: 2.9, g: 1.4, b: 0.4, shape: Shape.Orb, maxLevel: 8,
+    r: 0.98, g: 0.44, b: 0.10, shape: Shape.Orb, maxLevel: 8,
   },
   {
     id: W.Arc, name: '호', desc: '주변을 베어낸다. 가까울수록 강하다',
     evoName: '회오리', evoDesc: '멈추지 않고 돈다. 벤 적을 끌고 간다',
     evoPassive: P.Swift, cooldown: 0.85,
-    r: 0.5, g: 2.4, b: 2.2, shape: Shape.Blade, maxLevel: 8,
+    r: 0.14, g: 0.86, b: 0.78, shape: Shape.Blade, maxLevel: 8,
   },
   {
     id: W.Bolt, name: '번개', desc: '적에서 적으로 튄다',
     evoName: '폭풍', evoDesc: '튈 때마다 강해진다. 끝없이 갈라진다',
     evoPassive: P.Fury, cooldown: 1.15,
-    r: 2.6, g: 2.4, b: 1.3, shape: Shape.Bolt, maxLevel: 8,
+    r: 0.92, g: 0.84, b: 0.30, shape: Shape.Bolt, maxLevel: 8,
   },
   {
     id: W.Orbit, name: '위성', desc: '주위를 도는 구체. 닿으면 부순다',
     evoName: '후광', evoDesc: '거대해지고 스친 자리에 불티를 남긴다',
     evoPassive: P.Bloom, cooldown: 0,
-    r: 1.8, g: 0.8, b: 2.7, shape: Shape.Orb, maxLevel: 8,
+    r: 0.62, g: 0.24, b: 0.96, shape: Shape.Orb, maxLevel: 8,
   },
   {
     id: W.Nova, name: '신성', desc: '주기적으로 사방을 밀어낸다',
     evoName: '붕괴', evoDesc: '밀어내는 대신 빨아들인 뒤 터뜨린다',
     evoPassive: P.Greed, cooldown: 2.6,
-    r: 1.5, g: 2.0, b: 2.9, shape: Shape.Ring, maxLevel: 8,
+    r: 0.42, g: 0.66, b: 1.00, shape: Shape.Ring, maxLevel: 8,
   },
   {
     id: W.Thorn, name: '가시', desc: '뒤쪽으로 흩뿌린다. 도망칠수록 강하다',
     evoName: '덤불', evoDesc: '가시가 땅에 박혀 남는다',
     evoPassive: P.Ward, cooldown: 0.62,
-    r: 1.2, g: 2.4, b: 0.7, shape: Shape.Mote, maxLevel: 8,
+    r: 0.40, g: 0.86, b: 0.22, shape: Shape.Mote, maxLevel: 8,
   },
   {
     id: W.Well, name: '중력정', desc: '허공에 우물을 판다. 닿은 것이 끌려들어간다',
     evoName: '특이점', evoDesc: '삼킨 만큼 무거워지고, 한계에 닿으면 붕괴한다',
     evoPassive: P.Blast, cooldown: 3.4,
-    r: 1.4, g: 0.5, b: 2.8, shape: Shape.Singularity, maxLevel: 8,
+    r: 0.48, g: 0.14, b: 0.96, shape: Shape.Singularity, maxLevel: 8,
   },
   {
     id: W.Beam, name: '광선', desc: '별빛을 한 줄기로 모은다. 닿는 모든 것을 태운다',
     evoName: '천벌', evoDesc: '줄기가 갈라져 스스로 겨눈다',
     evoPassive: P.Pierce, cooldown: 1.9,
-    r: 2.9, g: 2.2, b: 1.0, shape: Shape.Prism, maxLevel: 8,
+    r: 1.00, g: 0.78, b: 0.34, shape: Shape.Prism, maxLevel: 8,
   },
   {
     id: W.Comet, name: '혜성', desc: '무거운 것을 던진다. 지형도 뚫는다',
     evoName: '운석우', evoDesc: '하늘이 무너진다. 여러 개가 동시에',
     evoPassive: P.Split, cooldown: 2.2,
-    r: 2.6, g: 1.3, b: 0.5, shape: Shape.Comet, maxLevel: 8,
+    r: 0.94, g: 0.44, b: 0.16, shape: Shape.Comet, maxLevel: 8,
   },
   {
     id: W.Sigil, name: '신문', desc: '지나온 자리에 문양을 새긴다. 밟으면 터진다',
     evoName: '봉인진', evoDesc: '문양이 서로를 잇는다. 선에 닿아도 터진다',
     evoPassive: P.Essence, cooldown: 0.75,
-    r: 2.2, g: 1.9, b: 0.4, shape: Shape.Sigil, maxLevel: 8,
+    r: 0.86, g: 0.72, b: 0.14, shape: Shape.Sigil, maxLevel: 8,
   },
   {
     id: W.Echo, name: '반향', desc: '내가 부순 자리에서 소리가 되돌아온다',
     evoName: '연쇄붕괴', evoDesc: '되돌아온 소리가 또 소리를 낳는다',
     evoPassive: P.Recoil, cooldown: 0,
-    r: 0.6, g: 2.0, b: 2.6, shape: Shape.Rift, maxLevel: 8,
+    r: 0.20, g: 0.72, b: 0.92, shape: Shape.Rift, maxLevel: 8,
   },
   {
     id: W.Still, name: '정지', desc: '주위의 시간이 느려진다',
     evoName: '영겁', evoDesc: '멈춘 것들은 더 아프게 부서진다',
     evoPassive: P.Awaken, cooldown: 4.2,
-    r: 0.5, g: 1.4, b: 2.9, shape: Shape.Halo, maxLevel: 8,
+    r: 0.16, g: 0.50, b: 1.00, shape: Shape.Halo, maxLevel: 8,
   },
 ]
 
@@ -374,11 +379,11 @@ function fireBeam(slot: WeaponSlot, ctx: FireCtx): void {
       const t = k / steps
       ctx.motes.spawn(
         p.x + dx * len * t, p.y + dy * len * t, 0, 0,
-        0.18, width * 1.6, def.r, def.g, def.b, Shape.Spark,
-        0, Math.atan2(dy, dx), 1,
+        0.18, width * 1.6, def.r * ACCENT * 0.5, def.g * ACCENT * 0.5, def.b * ACCENT * 0.5,
+        Shape.Spark, 0, Math.atan2(dy, dx), 1,
       )
     }
-    ctx.motes.spawn(ex, ey, 0, 0, 0.3, width * 3, def.r, def.g, def.b, Shape.Nova, 0, 0, 1)
+    ctx.motes.spawn(ex, ey, 0, 0, 0.3, width * 3, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, Shape.Nova, 0, 0, 1)
   }
   ctx.shake(4, 14)
   ctx.sfx('bolt')
@@ -528,7 +533,7 @@ function fireArc(slot: WeaponSlot, ctx: FireCtx): void {
     ctx.motes.spawn(
       p.x + Math.cos(a) * radius * 0.75, p.y + Math.sin(a) * radius * 0.75,
       Math.cos(a) * 60, Math.sin(a) * 60,
-      0.26, radius * 0.42, def.r, def.g, def.b, Shape.Blade,
+      0.26, radius * 0.42, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, Shape.Blade,
       0, a + Math.PI * 0.5, 4,
     )
   }
@@ -606,13 +611,13 @@ function drawBolt(
     const jitter = k === 0 || k === steps ? 0 : (Math.random() - 0.5) * 26
     ctx.motes.spawn(
       x0 + dx * t + nx * jitter, y0 + dy * t + ny * jitter,
-      0, 0, 0.16, 9, r, g, b, Shape.Spark, 0, Math.atan2(dy, dx), 1,
+      0, 0, 0.16, 9, r * FX_BASE, g * FX_BASE, b * FX_BASE, Shape.Spark, 0, Math.atan2(dy, dx), 1,
     )
   }
   // 착탄 지점에 번개 문양 하나. 아틀라스에 Bolt 셀을 구워 놓고 아무 데서도 안 써서
   // 이 게임에 존재하지 않는 그림이었다.
   ctx.motes.spawn(
-    x1, y1, 0, 0, 0.22, 30, r * 1.2, g * 1.2, b, Shape.Bolt,
+    x1, y1, 0, 0, 0.22, 30, r * FX_BASE, g * FX_BASE, b * FX_BASE * 0.8, Shape.Bolt,
     0, Math.atan2(dy, dx) - Math.PI * 0.5, 1,
   )
 }
@@ -644,11 +649,11 @@ function tickOrbit(slot: WeaponSlot, ctx: FireCtx, dt: number): void {
     }
 
     // 구체 자체를 파티클로 그린다 (수명이 한 프레임)
-    ctx.motes.spawn(ox, oy, 0, 0, 0.02, size, def.r, def.g, def.b, Shape.Orb, 0, a, 0)
+    ctx.motes.spawn(ox, oy, 0, 0, 0.02, size, def.r * 1.1, def.g * 1.1, def.b * 1.1, Shape.Orb, 0, a, 0)
     if (slot.evolved && Math.random() < 0.3) {
       ctx.motes.spawn(
         ox, oy, Math.cos(a + 1.57) * 40, Math.sin(a + 1.57) * 40,
-        0.5, size * 0.3, def.r, def.g, def.b, Shape.Spark, 4, a, 2,
+        0.5, size * 0.3, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, Shape.Spark, 4, a, 2,
       )
     }
   }
@@ -675,7 +680,7 @@ function fireNova(slot: WeaponSlot, ctx: FireCtx): void {
   }
 
   ctx.motes.spawn(p.x, p.y, 0, 0, 0.5, radius * (slot.evolved ? 0.5 : 1), def.r, def.g, def.b, Shape.Ring, 0, 0, 1)
-  spray(ctx.motes, p.x, p.y, 1, 0, 6.283, 18, def.r, def.g, def.b, slot.evolved ? -260 : 340, 0.5, 5)
+  spray(ctx.motes, p.x, p.y, 1, 0, 6.283, 10, def.r * FX_BASE, def.g * FX_BASE, def.b * FX_BASE, slot.evolved ? -260 : 340, 0.4, 4)
   ctx.shake(slot.evolved ? 7 : 5, 12)
   ctx.sfx('nova')
 }

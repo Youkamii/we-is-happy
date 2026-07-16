@@ -14,6 +14,9 @@ import { SpatialHash } from '../engine/grid'
 import type { Input } from '../engine/input'
 import type { Renderer } from '../engine/renderer'
 import { Rng } from '../engine/rng'
+import {
+  ACCENT, DROP_BASE, EVENT, FIELD_BASE, FOE_BASE, FX_BASE, PLAYER_BASE, SHOT_BASE, TERRAIN_BASE,
+} from '../engine/palette'
 import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
@@ -174,9 +177,11 @@ export class Game implements FireCtx {
   choose(choice: Choice): void {
     this.loadout.apply(choice, this.player)
     if (choice.kind === 'evolve') {
+      // 진화는 이 게임에서 가장 귀한 순간이라 유일하게 EVENT 밝기를 쓴다. 1초 미만.
       this.sfx('evolve')
-      shockwave(this.motes, this.player.x, this.player.y, 220, choice.r, choice.g, choice.b, 0.9)
-      burst(this.motes, this.player.x, this.player.y, 60, choice.r, choice.g, choice.b, 460, 1.0, 8, Shape.Star)
+      const k = EVENT
+      shockwave(this.motes, this.player.x, this.player.y, 220, choice.r * k, choice.g * k, choice.b * k, 0.9)
+      burst(this.motes, this.player.x, this.player.y, 60, choice.r * k, choice.g * k, choice.b * k, 460, 1.0, 8, Shape.Star)
       this.camera.shake(14, 8)
     }
     this.pendingLevels--
@@ -338,7 +343,7 @@ export class Game implements FireCtx {
       this.bossSpawned = false
       this.bossIdx = -1
       // 막이 바뀌는 순간이 곧 이정표다 — 화면과 소리가 같이 알려야 한다
-      shockwave(this.motes, this.player.x, this.player.y, 420, 2.4, 2.0, 0.9, 1.4)
+      shockwave(this.motes, this.player.x, this.player.y, 420, EVENT * 0.7, EVENT * 0.6, 0.8, 1.4)
       this.camera.shake(10, 5)
       this.sfx('levelup')
     }
@@ -380,8 +385,8 @@ export class Game implements FireCtx {
     this.bossIdx = i
     this.bossMaxHp = this.foes.hp[i]!
     // 보스는 화면에서 즉시 구분돼야 한다
-    shockwave(this.motes, this.foes.x[i]!, this.foes.y[i]!, 260, 2.8, 0.4, 0.6, 1.2)
-    burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 50, 2.8, 0.5, 0.7, 400, 1.0, 10, Shape.Crown)
+    shockwave(this.motes, this.foes.x[i]!, this.foes.y[i]!, 260, EVENT * 0.8, 0.4, 0.6, 1.2)
+    burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 34, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
     this.camera.shake(18, 6)
     this.sfx('evolve')
   }
@@ -485,7 +490,7 @@ export class Game implements FireCtx {
         const dy = wy - y
         if (dx * dx + dy * dy > radius * radius) continue
         if (t.damageCell(cx, cy, power, this.elapsed)) {
-          smoke(this.motes, wx, wy, 3, 1.5, 1.1, 0.85, 10)
+          smoke(this.motes, wx, wy, 2, 0.3, 0.24, 0.2, 10)
         }
       }
     }
@@ -590,7 +595,7 @@ export class Game implements FireCtx {
     }
     this.echoDepth--
     shockwave(this.motes, x, y, radius, cr, cg, cb, 0.4)
-    burst(this.motes, x, y, 10, cr, cg, cb, radius * 2.4, 0.4, 5)
+    burst(this.motes, x, y, 6, cr, cg, cb, radius * 2.4, 0.35, 4)
   }
 
   private updateShots(dt: number): void {
@@ -623,7 +628,7 @@ export class Game implements FireCtx {
           this.breakTerrain(x, y, shots.radius[i]! * 1.6, 40)
         } else {
           const broke = this.terrain.damageAt(x, y, shots.damage[i]! * 1.6, this.elapsed)
-          smoke(this.motes, x, y, broke ? 5 : 2, 1.5, 1.1, 0.85, broke ? 12 : 7)
+          smoke(this.motes, x, y, broke ? 3 : 1, 0.3, 0.24, 0.2, broke ? 12 : 7)
           if (broke) this.camera.shake(1.6, 20)
           shots.kill(i)
           continue
@@ -665,7 +670,7 @@ export class Game implements FireCtx {
         }
 
         if (shots.pierce[i]! <= 0) {
-          spray(this.motes, x, y, -shots.vx[i]!, -shots.vy[i]!, 1.6, 4, 2.4, 1.7, 0.6, 190, 0.22, 3)
+          spray(this.motes, x, y, -shots.vx[i]!, -shots.vy[i]!, 1.6, 2, FX_BASE * 1.4, FX_BASE, FX_BASE * 0.4, 170, 0.16, 2.6)
           shots.kill(i)
           break
         }
@@ -735,9 +740,12 @@ export class Game implements FireCtx {
     // 화면에 2만 마리가 죽는 후반에 파티클을 그대로 뿌리면 풀이 순식간에 마른다.
     // 큰 적일수록 많이, 잔챙이는 적게.
     const big = stat.radius > 16
-    const n = big ? 14 : 5
-    burst(this.motes, x, y, n, stat.r, stat.g, stat.b, 210, 0.34, 4)
-    if (big) shockwave(this.motes, x, y, stat.radius * 2.2, stat.r, stat.g, stat.b, 0.3)
+    // 후반엔 초당 수백 마리가 죽는다. 개당 파티클이 많으면 화면이 파티클로 뒤덮여
+    // 정작 적이 안 보인다 — 잔챙이는 조각 몇 개면 충분하다.
+    const n = big ? 9 : 3
+    const k = FX_BASE
+    burst(this.motes, x, y, n, stat.r * k, stat.g * k, stat.b * k, 190, 0.26, 3.4)
+    if (big) shockwave(this.motes, x, y, stat.radius * 2.2, stat.r * k, stat.g * k, stat.b * k, 0.3)
     this.sfx(big ? 'bigKill' : 'kill')
 
     this.drops.spawn(
@@ -796,7 +804,7 @@ export class Game implements FireCtx {
           this.sfx('pickup')
         } else if (type === Drop.Heal) {
           p.heal(drops.value[i]!)
-          shockwave(this.motes, p.x, p.y, 40, 0.4, 2.4, 1.0, 0.35)
+          shockwave(this.motes, p.x, p.y, 40, 0.25, 1.4, 0.6, 0.35)
         }
         drops.kill(i)
       }
@@ -808,8 +816,8 @@ export class Game implements FireCtx {
       // 레벨 자체가 기초 스탯을 올린다 — 선택과 무관한 성장 축이라 여기서 재계산한다
       this.loadout.recomputeStats(p)
       this.pendingChoices = this.loadout.roll(this.rng, 3, p.stats.awaken)
-      shockwave(this.motes, p.x, p.y, 70, 2.6, 2.2, 0.8, 0.5)
-      burst(this.motes, p.x, p.y, 26, 2.6, 2.1, 0.7, 300, 0.7, 6, Shape.Star)
+      shockwave(this.motes, p.x, p.y, 70, 1.6, 1.35, 0.5, 0.5)
+      burst(this.motes, p.x, p.y, 18, 1.6, 1.3, 0.45, 300, 0.6, 5, Shape.Star)
       this.camera.shake(5, 14)
       this.sfx('levelup')
     }
@@ -818,8 +826,9 @@ export class Game implements FireCtx {
   private onDeath(): void {
     this.phase = Phase.Dead
     this.sfx('death')
-    burst(this.motes, this.player.x, this.player.y, 90, 2.6, 0.5, 0.3, 420, 1.2, 9)
-    shockwave(this.motes, this.player.x, this.player.y, 180, 2.6, 0.4, 0.3, 0.9)
+    // 죽는 순간은 세리머니다 — 여기선 밝아도 된다 (게임이 끝났으니 가릴 것도 없다)
+    burst(this.motes, this.player.x, this.player.y, 70, EVENT, 0.5, 0.3, 420, 1.2, 9)
+    shockwave(this.motes, this.player.x, this.player.y, 180, EVENT, 0.4, 0.3, 0.9)
     this.camera.shake(26, 5)
   }
 
@@ -862,14 +871,16 @@ export class Game implements FireCtx {
         // 닳으면 어두워지고 갈라진다 — 얼마나 버틸지 눈으로 보여야 한다
         const recent = this.elapsed - ter.flash[ci]!
         const lit = recent < 0.12 ? 1.9 : 1
-        const v = 0.1 + frac * 0.24
-        const tint = ter.tint[ci]!
-        // 속을 채우고 테두리를 얹는다. 속 빈 육각만 그리면 벌집처럼 보여서
-        // "벽"이 아니라 "뚫린 곳"으로 읽힌다.
-        b.push(wx, wy, CELL * 0.74, 0, v * 0.3 * lit, v * 0.26 * lit, v * 0.5 * lit, 1, Shape.Hex)
+        // 지형은 **절대 번지지 않는다**. 구조만 읽히면 된다 — 여기가 밝으면
+        // 화면의 30%가 통째로 발광체가 된다.
+        // 지형은 **절대 번지지 않고 채도도 없다**. 색이 있으면 적과 섞인다 —
+        // 실제로 보라 지형과 보라 탱커가 구분이 안 됐다. 채도 있는 색은 적의 것이다.
+        const v = TERRAIN_BASE * (0.5 + frac * 0.5)
+        const tint = ter.tint[ci]! * 0.03
+        b.push(wx, wy, CELL * 0.74, 0, v * 0.3, v * 0.3, v * 0.34, 1, Shape.Hex)
         b.push(
           wx, wy, CELL * 0.6, 0,
-          (v + tint * 0.05) * lit, (v * 0.92) * lit, (v * 1.5 + 0.06) * lit, 1,
+          (v + tint) * lit, (v + tint) * lit, (v * 1.1 + tint) * lit, 1,
           frac < 0.45 ? Shape.Crack : Shape.Hex,
         )
       }
@@ -891,7 +902,8 @@ export class Game implements FireCtx {
         const dy = y - cy
         if (dx * dx + dy * dy > cullR2 * 1.5) continue
         const pulse = 0.75 + Math.sin(t * 2.4 + a * 9) * 0.3
-        b.push(x, y, 34, a, 1.5 * pulse, 0.3 * pulse, 0.5 * pulse, 1, Shape.Orb)
+        // 경계는 벽이지 조명이 아니다
+        b.push(x, y, 34, a, 0.5 * pulse, 0.1 * pulse, 0.16 * pulse, 1, Shape.Orb)
       }
     }
 
@@ -907,9 +919,10 @@ export class Game implements FireCtx {
       const type = drops.type[i]!
       const bob = 1 + Math.sin(t * 7 + drops.age[i]! * 4) * 0.16
       if (type === Drop.Xp) {
-        b.push(x, y, 7.5 * bob, t * 2, 0.5, 2.3, 2.8, 1, Shape.Orb)
+        b.push(x, y, 7 * bob, t * 2, DROP_BASE * 0.25, DROP_BASE * 1.1, DROP_BASE * 1.35, 1, Shape.Orb)
       } else if (type === Drop.Heal) {
-        b.push(x, y, 12 * bob, t * 1.4, 0.5, 2.8, 1.2, 1, Shape.Star)
+        // 회복은 드무니까 눈에 띄어도 된다
+        b.push(x, y, 12 * bob, t * 1.4, 0.3, 1.5, 0.7, 1, Shape.Star)
       }
     }
 
@@ -926,26 +939,29 @@ export class Game implements FireCtx {
       const isBoss = i === this.bossIdx
       const stat = FOE_STATS[foes.type[i]!]!
       const flash = foes.flash[i]!
-      // 맞은 순간 하얗게 뜬다. 이거 하나로 타격감이 산다.
-      const hit = flash > 0 ? 1 + flash * 26 : 1
+      // 맞은 순간 밝아진다. 이거 하나로 타격감이 사는데, 배율이 크면 후반에
+      // 초당 수천 번 터져서 화면이 하얘진다 — ACCENT 안에서만 논다.
+      const hit = flash > 0 ? 1 + flash * (ACCENT * 3.5) : 1
       const hpFrac = foes.hp[i]! / foes.maxHp[i]!
       // 피가 닳으면 어두워진다 — 체력바 없이 상태를 읽게
       const dim = 0.45 + hpFrac * 0.55
       // 불타는 적은 주황으로 물든다. 장작불 빌드가 화면에 보여야 재미가 있다.
       const fire = foes.burn[i]! > 0 ? 1 : 0
       const size = isBoss ? stat.radius * 3.4 : stat.radius
+      // 보스는 하나뿐이라 밝아도 안전하다. 잡졸은 기준선을 지킨다.
+      const lum = (isBoss ? ACCENT : FOE_BASE) * hit * dim
       b.push(
         x, y, size, foeRotation(foes, i, t),
-        (stat.r + fire * 1.7) * hit * dim,
-        (stat.g + fire * 0.55) * hit * dim,
-        (stat.b * (1 - fire * 0.55)) * hit * dim,
+        (stat.r + fire * 0.85) * lum,
+        (stat.g + fire * 0.3) * lum,
+        stat.b * (1 - fire * 0.55) * lum,
         1,
         stat.shape,
       )
       // 보스는 화면에서 즉시 구분돼야 한다 — 왕관과 도는 광륜
       if (isBoss) {
-        b.push(x, y, size * 1.5, t * 0.7, 2.6, 1.6, 0.5, 1, Shape.Halo)
-        b.push(x, y + size * 1.3, size * 0.7, Math.sin(t * 2) * 0.12, 2.9, 2.2, 0.8, 1, Shape.Crown)
+        b.push(x, y, size * 1.5, t * 0.7, 1.6, 0.9, 0.28, 1, Shape.Halo)
+        b.push(x, y + size * 1.3, size * 0.7, Math.sin(t * 2) * 0.12, 1.9, 1.4, 0.5, 1, Shape.Crown)
       }
     }
 
@@ -963,14 +979,17 @@ export class Game implements FireCtx {
       const w = shots.weapon[i]!
       const def = WEAPONS[w & 127]!
       const evo = w >= 128
-      const cr = evo ? def.r * 1.3 + 0.5 : def.r
-      const cg = evo ? def.g * 0.9 : def.g
-      const cb = evo ? def.b * 0.75 : def.b
+      // 진화탄만 1.0 을 넘긴다 — "진화했다"를 화면으로 알리는 유일한 수단이라
+      // 특권을 여기 몰아준다.
+      const k = evo ? ACCENT : SHOT_BASE
+      const cr = def.r * k
+      const cg = def.g * k
+      const cb = def.b * k
       const rad = shots.radius[i]!
       // 잔상은 공통, 본체는 무기가 정한 모양. WeaponDef.shape 를 아무도 안 읽어서
       // 무기 6종의 탄이 전부 똑같은 구슬이었다.
-      b.push(x, y, rad * 2.5, rot, cr * 0.8, cg * 0.8, cb * 0.8, 1, Shape.Spark)
-      b.push(x, y, rad * 1.25, rot, cr + 0.6, cg + 0.6, cb + 0.6, 1, def.shape)
+      b.push(x, y, rad * 2.5, rot, cr * 0.5, cg * 0.5, cb * 0.5, 1, Shape.Spark)
+      b.push(x, y, rad * 1.25, rot, cr, cg, cb, 1, def.shape)
     }
 
     // 파티클
@@ -1012,33 +1031,34 @@ export class Game implements FireCtx {
           // 특이점은 가운데가 비어 보여야 한다 — Singularity 모양이 그 일을 한다
           const spin = t * (evo ? 3.4 : 1.8) + seed * 6.283
           const pulse = 1 + Math.sin(t * 7 + seed * 10) * 0.06
-          b.push(x, y, r * 0.55 * pulse, spin, 1.5, 0.5, 3.0, 1, Shape.Singularity)
-          b.push(x, y, r * 0.95, -spin * 0.5, 0.7, 0.2, 1.5, 1, Shape.Vortex)
+          const k = FIELD_BASE
+          b.push(x, y, r * 0.55 * pulse, spin, k * 1.1, k * 0.35, k * 2.2, 1, Shape.Singularity)
+          b.push(x, y, r * 0.95, -spin * 0.5, k * 0.5, k * 0.15, k * 1.1, 1, Shape.Vortex)
           if (evo) {
-            // 삼킨 만큼 밝아진다 — 곧 터진다는 신호
+            // 삼킨 만큼 밝아진다 — 곧 터진다는 신호. 이건 경고라 밝아도 된다.
             const charge = Math.min(1, f.charge[i]! * 0.02)
-            b.push(x, y, r * 0.4 * (1 + charge), spin * 2, 2.8 * charge, 0.6 * charge, 3.4 * charge, 1, Shape.Nova)
+            b.push(x, y, r * 0.4 * (1 + charge), spin * 2, ACCENT * charge, 0.4 * charge, ACCENT * 1.2 * charge, 1, Shape.Nova)
           }
           break
         }
         case Field.Sigil: {
           // 문양은 바닥에 새겨진 것이라 옅어야 한다 — 밝게 그렸더니 화면 중앙이
           // 흰 링으로 덮여서 적이 안 보였다.
-          const a = (0.2 + frac * 0.4) * 0.7
-          b.push(x, y, r * 1.1, seed * 6.283 + t * 0.4, 1.5 * a, 1.3 * a, 0.35 * a, 1, Shape.Sigil)
-          if (evo) b.push(x, y, r * 0.5, -t * 1.2, 1.7 * a, 1.4 * a, 0.4 * a, 1, Shape.Rune)
+          const a = FIELD_BASE * (0.5 + frac * 0.5)
+          b.push(x, y, r * 1.1, seed * 6.283 + t * 0.4, a * 1.5, a * 1.25, a * 0.3, 1, Shape.Sigil)
+          if (evo) b.push(x, y, r * 0.5, -t * 1.2, a * 1.7, a * 1.4, a * 0.35, 1, Shape.Rune)
           break
         }
         case Field.Still: {
           // 정지장은 시간이 멎은 느낌이라 아주 천천히 돈다
-          const a = 0.3 + frac * 0.5
-          b.push(x, y, r * 1.05, t * 0.25 + seed, 0.5 * a, 1.4 * a, 2.9 * a, 1, Shape.Halo)
-          b.push(x, y, r * 0.7, -t * 0.18, 0.3 * a, 0.9 * a, 2.2 * a, 1, Shape.Ring)
+          const a = FIELD_BASE * (0.6 + frac * 0.6)
+          b.push(x, y, r * 1.05, t * 0.25 + seed, a * 0.3, a * 0.9, a * 1.9, 1, Shape.Halo)
+          b.push(x, y, r * 0.7, -t * 0.18, a * 0.2, a * 0.6, a * 1.5, 1, Shape.Ring)
           break
         }
         case Field.Echo: {
           const grow = 2 - frac
-          b.push(x, y, r * grow, seed * 6.283, 0.6 * frac, 2.0 * frac, 2.6 * frac, 1, Shape.Rift)
+          b.push(x, y, r * grow, seed * 6.283, FIELD_BASE * 0.5 * frac, FIELD_BASE * 1.6 * frac, FIELD_BASE * 2.0 * frac, 1, Shape.Rift)
           break
         }
       }
@@ -1049,8 +1069,13 @@ export class Game implements FireCtx {
     const p = this.player
     if (p.alive) {
       const inv = p.invuln > 0 ? 0.45 + Math.sin(t * 40) * 0.3 : 1
-      b.push(p.x, p.y, 34, t * 0.5, 0.7 * inv, 1.2 * inv, 2.4 * inv, 1, Shape.Halo)
-      b.push(p.x, p.y, 20, -t * 1.4, 2.9 * inv, 2.3 * inv, 3.4 * inv, 1, Shape.Seed)
+      // 화면에서 제일 밝다. 하나뿐이라 안전하고, **내가 어디 있는지는 절대 잃으면 안 된다** —
+      // 적 2,000마리 사이에서 묻히면 그 순간 게임을 할 수 없다.
+      // 광륜(느린 회전) + 씨앗 코어(빠른 역회전) + 십자 섬광. 셋 다 다른 속도로 돌아서
+      // 정적인 적 무리 속에서 유일하게 "살아 있는" 것으로 읽힌다.
+      b.push(p.x, p.y, 42, t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
+      b.push(p.x, p.y, 26, -t * 1.4, PLAYER_BASE * inv, PLAYER_BASE * 0.85 * inv, PLAYER_BASE * 1.2 * inv, 1, Shape.Seed)
+      b.push(p.x, p.y, 15, t * 3.1, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, 1, Shape.Nova)
     }
 
     renderer.end(t, p.hurtFlash)

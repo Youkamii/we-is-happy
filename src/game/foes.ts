@@ -50,17 +50,29 @@ export interface FoeStat {
  * 뒤에 꼬리가 쌓인다. 돌진체(Husk)는 순간 2.35배로 튀므로 실질 최고 속도가
  * 플레이어를 넘는다 — 도망만 치면 뒤통수를 맞으라는 뜻이다.
  */
+/**
+ * 색은 **1.0 을 넘지 않는다** (palette.ts 의 FOE_BASE 규칙).
+ *
+ * 예전엔 2.4~2.9 를 썼다. bloom 임계값이 1.05 이니 적 하나하나가 전부 번졌고,
+ * 후반에 2,000마리가 몰리면 화면이 통째로 하얘져서 정작 피해야 할 것이 안 보였다
+ * (사용자: "이펙트 너무 세서 화면이 안 보임"). 적은 화면의 대부분을 차지하므로
+ * **여기가 기준선**이고, 여기서 1.0 을 넘으면 그 순간 게임이 안 보인다.
+ *
+ * 대신 색상(hue)을 확실히 갈라서 밝기 없이도 종족이 읽히게 한다.
+ */
 export const FOE_STATS: readonly FoeStat[] = [
-  // Mote — 청록. 잔챙이. 화면을 채우는 물량.
-  { speed: 148, radius: 11, hp: 4, damage: 6, xp: 1, r: 0.3, g: 1.7, b: 2.1, shape: Shape.Mote, sep: 19, behavior: Behavior.Chase, weight: 1, gnaw: 7 },
+  // Mote — 청록. 잔챙이. 화면을 채우는 물량이라 가장 어둡다.
+  { speed: 148, radius: 11, hp: 4, damage: 6, xp: 1, r: 0.10, g: 0.52, b: 0.66, shape: Shape.Mote, sep: 19, behavior: Behavior.Chase, weight: 1, gnaw: 7 },
   // Husk — 주황. 돌진. 방심하면 뒤통수를 친다. (버스트 시 실속도 190*2.35)
-  { speed: 190, radius: 12, hp: 9, damage: 12, xp: 3, r: 2.4, g: 0.85, b: 0.2, shape: Shape.Husk, sep: 21, behavior: Behavior.Dash, weight: 0.85, gnaw: 14 },
+  { speed: 190, radius: 12, hp: 9, damage: 12, xp: 3, r: 0.86, g: 0.34, b: 0.06, shape: Shape.Husk, sep: 21, behavior: Behavior.Dash, weight: 0.85, gnaw: 14 },
   // Hex — 보라. 탱커. 느리지만 벽처럼 밀고 들어온다.
-  { speed: 88, radius: 19, hp: 46, damage: 18, xp: 8, r: 1.5, g: 0.5, b: 2.3, shape: Shape.Hex, sep: 34, behavior: Behavior.Chase, weight: 0.35, gnaw: 40 },
+  // 모양이 Shape.Hex 였는데 **지형이 육각 타일이라 적과 벽이 구분이 안 됐다**
+  // (같은 모양 + 비슷한 보라). 지형은 격자라 육각이 자연스러우니 적을 결정으로 옮겼다.
+  { speed: 88, radius: 19, hp: 46, damage: 18, xp: 8, r: 0.72, g: 0.16, b: 0.98, shape: Shape.Prism, sep: 34, behavior: Behavior.Chase, weight: 0.35, gnaw: 40 },
   // Wisp — 연두. 주위를 돌며 거리를 잰다. 몰리면 도망칠 길이 막힌다.
-  { speed: 152, radius: 10, hp: 14, damage: 9, xp: 4, r: 0.7, g: 2.2, b: 0.6, shape: Shape.Orb, sep: 24, behavior: Behavior.Orbit, weight: 0.7, gnaw: 9 },
-  // Eye — 적색. 엘리트. 드물고 아프고 많이 준다.
-  { speed: 132, radius: 27, hp: 190, damage: 26, xp: 40, r: 2.6, g: 0.3, b: 0.45, shape: Shape.Eye, sep: 48, behavior: Behavior.Chase, weight: 0.15, gnaw: 95 },
+  { speed: 152, radius: 10, hp: 14, damage: 9, xp: 4, r: 0.26, g: 0.82, b: 0.20, shape: Shape.Orb, sep: 24, behavior: Behavior.Orbit, weight: 0.7, gnaw: 9 },
+  // Eye — 적색. 엘리트. 드물고 아프고 많이 준다. 드무니까 조금 밝아도 된다.
+  { speed: 132, radius: 27, hp: 190, damage: 26, xp: 40, r: 1.0, g: 0.12, b: 0.18, shape: Shape.Eye, sep: 48, behavior: Behavior.Chase, weight: 0.15, gnaw: 95 },
 ]
 
 /** 이웃을 몇 마리까지 보고 끊을지. 밀집 구간에서 이게 없으면 O(n²)로 돌아간다. */
