@@ -123,6 +123,20 @@ export function levelGainOf(level: number): LevelGain {
   }
 }
 
+/**
+ * 다음 레벨까지 필요한 XP. **지수 곡선.**
+ *
+ * 1.115 배씩 오르면 Lv 50 이 Lv 10 의 약 80배다. 킬이 10배로 늘어도 레벨은
+ * 20 남짓만 더 오른다 — 그게 상한을 만든다. 다항식은 이 상한이 없어서
+ * 잘 굴러가는 빌드가 Lv 111 까지 갔다.
+ */
+export function xpForLevel(level: number): number {
+  // 첫 두 레벨은 아주 싸게 — 첫 레벨업이 늦으면 아무도 기다리지 않는다.
+  // 여기가 5 → 11 로 오르자 봇이 8초 동안 Lv 1 에 머물렀다(테스트가 잡았다).
+  if (level <= 2) return 4 + level * 2
+  return Math.floor(7 * Math.pow(1.115, level - 1) + level * 2)
+}
+
 export class Player {
   x = 0
   y = 0
@@ -132,7 +146,7 @@ export class Player {
   stats: Stats = baseStats()
   level = 1
   xp = 0
-  xpNeeded = 5
+  xpNeeded = xpForLevel(1)
   /** 남은 무적 시간 */
   invuln = 0
   /** 피격 연출 강도 0..1 — 화면 붉은 플래시가 여기 붙는다 */
@@ -156,7 +170,7 @@ export class Player {
     this.hp = this.stats.maxHp
     this.level = 1
     this.xp = 0
-    this.xpNeeded = 5
+    this.xpNeeded = xpForLevel(1)
     this.invuln = 0
     this.hurtFlash = 0
     this.faceX = 1
@@ -227,8 +241,13 @@ export class Player {
    *   6판 중 2판만 진화를 딱 1번 봤다. 진화는 이 게임 조합 시스템의 정점인데
    *   15분을 버텨도 못 본다면 그 시스템은 없는 거나 마찬가지다.
    *
-   * 목표는 15분에 Lv 45~60, 진화 2~4회. 삼차항은 남기되(후반 폭주 방지) 계수를
-   * 3분의 1로 줄이고 이차항도 낮춰서, 중반까지 잘 오르고 끝에서만 눕게 했다.
+   * - lv²·0.92 + lv³·0.018 → **Lv 23 ~ Lv 111**. 편차가 5배다. 빌드가 잘 굴러가면
+   *   킬이 폭증하고 → XP 가 폭증하고 → 레벨이 폭주한다. 안 굴러가면 23에 머문다.
+   *   편차 5배는 "레벨"이라는 축이 의미를 잃었다는 뜻이다.
+   *
+   * 다항식으로 네 번 시도했고 네 번 다 실패했다. 이유는 구조적이다 — **킬 수가 후반에
+   * 지수적으로 늘어나는데 요구치가 다항이면 언젠가 반드시 따라잡힌다.** 그래서 곡선을
+   * 지수로 바꿨다(xpForLevel). 목표는 15분에 Lv 40~55, 진화 2~4회.
    *
    * 한 번에 여러 레벨이 오를 수 있다(자석으로 XP 를 한꺼번에 빨아들일 때).
    * 한 레벨만 올리면 나머지 XP 가 조용히 증발한다.
@@ -239,8 +258,7 @@ export class Player {
     while (this.xp >= this.xpNeeded) {
       this.xp -= this.xpNeeded
       this.level++
-      const l = this.level
-      this.xpNeeded = Math.floor(4 + l * 4 + l * l * 0.92 + l * l * l * 0.018)
+      this.xpNeeded = xpForLevel(this.level)
       gained++
     }
     return gained

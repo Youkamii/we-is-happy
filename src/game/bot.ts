@@ -8,8 +8,10 @@
  * 게임 코드가 아니라 계측 도구다. 번들에는 테스트에서만 쓰여 들어가지 않는다.
  */
 import type { MoveVector } from '../engine/input'
+import { BossState } from './boss'
 import type { Game } from './game'
 import { WORLD_R } from './game'
+import { CELL } from './terrain'
 
 const buf = new Int32Array(256)
 
@@ -56,6 +58,54 @@ export class Bot {
       }
     }
 
+    // 2b) 별의 잔해로 간다.
+    //
+    // 이게 없으면 **내가 만든 걸 아무도 안 쓴다** — 잔해를 넣어 놓고 봇은 도망만
+    // 다니니, 그게 실제로 굴러가는지 잴 자가 없다. 사람은 금색 표식을 보고 간다.
+    // 가까운 것만 본다: 화면 밖 잔해까지 쫓으면 그건 사람이 아니라 신이다.
+    let cx = 0
+    let cy = 0
+    let cacheFound = false
+    const t = game.terrain
+    const CACHE_SIGHT = 620
+    {
+      const c0x = t.cellX(p.x - CACHE_SIGHT)
+      const c1x = t.cellX(p.x + CACHE_SIGHT)
+      const c0y = t.cellY(p.y - CACHE_SIGHT)
+      const c1y = t.cellY(p.y + CACHE_SIGHT)
+      let bestD = CACHE_SIGHT * CACHE_SIGHT
+      for (let ccy = c0y; ccy <= c1y; ccy++) {
+        for (let ccx = c0x; ccx <= c1x; ccx++) {
+          if (!t.inBounds(ccx, ccy)) continue
+          if (t.cache[ccy * t.cols + ccx] !== 1) continue
+          const wx = t.originX + ccx * CELL + CELL * 0.5
+          const wy = t.originY + ccy * CELL + CELL * 0.5
+          const dx = wx - p.x
+          const dy = wy - p.y
+          const d2 = dx * dx + dy * dy
+          if (d2 < bestD) {
+            bestD = d2
+            cx = dx
+            cy = dy
+            cacheFound = true
+          }
+        }
+      }
+    }
+
+    // 2c) 보스 빈틈이면 붙는다. 피한 보상을 안 챙기면 패턴을 넣은 의미가 없다.
+    let bx = 0
+    let by = 0
+    let bossOpening = false
+    if (game.boss.idx >= 0 && game.boss.state === BossState.Stagger) {
+      const j = game.boss.idx
+      if (game.foes.alive[j] === 1) {
+        bx = game.foes.x[j]! - p.x
+        by = game.foes.y[j]! - p.y
+        bossOpening = true
+      }
+    }
+
     let mx = 0
     let my = 0
     const aLen = Math.hypot(ax, ay)
@@ -67,6 +117,18 @@ export class Bot {
     if (gLen > 1e-6) {
       mx += (gx / gLen) * 0.72
       my += (gy / gLen) * 0.72
+    }
+    // 잔해는 XP 보다 값지지만 회피보다는 아래다 — 파러 가다 죽으면 남는 게 없다
+    if (cacheFound) {
+      const cLen = Math.hypot(cx, cy) || 1
+      mx += (cx / cLen) * 0.85
+      my += (cy / cLen) * 0.85
+    }
+    // 빈틈은 짧다. 이 순간만큼은 회피보다 우선한다.
+    if (bossOpening) {
+      const bLen = Math.hypot(bx, by) || 1
+      mx += (bx / bLen) * 1.6
+      my += (by / bLen) * 1.6
     }
 
     // 3) 아무것도 없으면 크게 원을 그린다 (구석에 박히지 않게)
@@ -95,7 +157,6 @@ export class Bot {
     // 5) 벽 타기. 지형을 모르면 벽 쪽으로 도망치다 구석에 몰려 20초 만에 죽는다
     //    (실측: 지형을 넣자마자 봇 완주율이 4/6 → 2/6 으로 떨어진 원인이 이거였다).
     //    사람은 벽을 보고 피하므로, 이게 없으면 게임이 아니라 계측이 틀린 것이다.
-    const t = game.terrain
     const probe = 78
     if (t.solidAt(p.x + mx * probe, p.y + my * probe)) {
       // 진행 방향이 막혔다 → 수직 두 방향 중 열린 쪽으로 미끄러진다

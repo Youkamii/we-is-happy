@@ -42,8 +42,15 @@ const MAX_FIELDS = 512
 
 /** 시뮬레이션 고정 스텝 (초). 1/60. */
 const STEP = 1 / 60
-/** 한 프레임에 따라잡을 수 있는 최대 스텝 수. 탭 복귀 시 죽음의 나선을 막는다. */
-const MAX_STEPS = 5
+/**
+ * 한 프레임에 따라잡을 수 있는 최대 스텝 수. 탭 복귀 시 죽음의 나선을 막는다.
+ *
+ * **프레임률 하한의 여유분이기도 하다.** 5 였을 때 12fps(프레임당 5스텝 필요)에서
+ * 여유가 정확히 0이라, 레벨업 브레이크로 밀린 스텝을 영영 못 따라잡고 밀림이 쌓여
+ * 재동기화가 시뮬레이션 시간을 통째로 버렸다 — 12fps 플레이어만 몰래 시간이 건너뛴다.
+ * 8이면 12fps 에서 프레임당 3스텝의 여유가 있다.
+ */
+const MAX_STEPS = 8
 
 export const Phase = {
   Playing: 0,
@@ -69,7 +76,17 @@ export class Game implements FireCtx {
   readonly terrain = new Terrain(WORLD_R)
 
   rng = new Rng(1)
-  private acc = 0
+  /** 누적 실시간(초). 여기서 총 스텝 수를 유도한다 — 뺄셈 누적은 프레임률에 종속된다. */
+  private timeAcc = 0
+  /**
+   * 지금까지 실행한 시뮬레이션 스텝 수.
+   *
+   * 공개인 이유: **결정론 계약이 스텝 기준이기 때문이다.** "같은 시간"이 아니라
+   * "같은 스텝 수"라야 비교가 성립한다 — update() 는 dt 크기만큼 스텝을 묶어서
+   * 돌므로, 벽시계로 멈추면 3스텝 프레임이 최대 2스텝 넘어간다(실측: 적 423 vs 417).
+   * 협동 lockstep 도 스텝을 세지 시간을 안 센다.
+   */
+  stepsDone = 0
   private spawnTimer = 0
   /**
    * "이 탄이 이 적을 이미 때렸다"는 표시. 값은 탄의 고유 stamp(Shots 가 발급).
@@ -152,7 +169,8 @@ export class Game implements FireCtx {
     this.drops.clear()
     this.fields.clear()
     this.foeStamp.fill(0)
-    this.acc = 0
+    this.timeAcc = 0
+    this.stepsDone = 0
     this.spawnTimer = 0
     this.elapsed = 0
     this.phase = Phase.Playing
@@ -211,11 +229,20 @@ export class Game implements FireCtx {
       return
     }
 
-    this.acc += Math.min(frameDt, 0.25)
+    // **총 시간에서 스텝 수를 유도한다. 뺄셈으로 누적하지 않는다.**
+    //
+    // 예전엔 `acc += dt` 하고 `acc -= STEP` 을 반복했다. 그러면 1/60 을 2700번 빼는 것과
+    // 2/60 을 1350번 빼는 것의 부동소수점 누적 오차가 달라서 **총 스텝 수가 1 어긋난다**.
+    // 45초를 돌리면 30fps 와 60fps 의 적 수가 133 vs 129 로 갈렸다(테스트가 잡았다).
+    //
+    // wantSteps 를 총 경과 시간에서 floor 로 뽑으면 오차가 누적되지 않는다 —
+    // 2700×(1/60) 이든 1350×(2/60) 이든 합은 45.0 이고 floor 는 같다.
+    this.timeAcc += Math.min(frameDt, 0.25)
+    const wantSteps = Math.floor(this.timeAcc / STEP)
     let steps = 0
-    while (this.acc >= STEP && steps < MAX_STEPS) {
+    while (this.stepsDone < wantSteps && steps < MAX_STEPS) {
       this.step(input, STEP)
-      this.acc -= STEP
+      this.stepsDone++
       steps++
       // **phase 가 바뀌면 즉시 멈춘다.** 이게 없으면 프레임률이 시뮬레이션을 바꾼다:
       // 한 프레임이 33ms 를 넘으면 2스텝을 도는데, 서브스텝 1에서 레벨업이 떠도
@@ -224,12 +251,16 @@ export class Game implements FireCtx {
       // 144Hz 는 프레임당 1스텝이라 절대 초과하지 않고 30Hz 는 매 프레임 초과하므로,
       // 시드별 최고 기록이 프레임률 경쟁이 된다. 죽음/승리도 5번 중복 실행됐다.
       //
-      // acc 는 **버리지 않는다**. 여기서 0으로 밀면 2스텝 프레임만 남은 시간을 잃어
-      // 총 스텝 수가 또 프레임률에 종속된다. 남겨 두면 레벨업을 고른 뒤 다음
-      // 프레임이 그만큼 더 돌아 결국 같은 스텝 수로 수렴한다.
+      // 밀린 스텝은 **버리지 않는다**. stepsDone 이 남아 있으므로 레벨업을 고른 뒤
+      // 다음 프레임이 그만큼 더 돈다 — 총 스텝 수가 프레임률과 무관해진다.
       if (this.phase !== Phase.Playing) break
     }
-    if (steps === MAX_STEPS) this.acc = 0 // 밀린 건 버린다
+    // 따라잡기를 포기하는 경우(탭 복귀 등)엔 시계를 맞춰 준다.
+    // 안 그러면 stepsDone 이 영원히 뒤처져서 죽음의 나선이 된다.
+    if (steps === MAX_STEPS && wantSteps - this.stepsDone > MAX_STEPS * 4) {
+      this.stepsDone = wantSteps
+      this.timeAcc = this.stepsDone * STEP
+    }
 
     this.camera.follow(this.player.x, this.player.y, frameDt, 7.5)
     this.camera.update(frameDt)
@@ -616,7 +647,12 @@ export class Game implements FireCtx {
     if (!this.terrain.brokeCache) return
     this.terrain.brokeCache = false
     // 크게 준다 — 파는 데 시간이 걸렸고 그동안 적이 몰려왔다. 위험의 대가다.
-    const value = 26 + this.act * 14
+    //
+    // 값을 실측으로 잡았다: 처음엔 26+act*14 였는데, 봇이 58개를 파고도 Lv 23 이었다.
+    // 만든 게 있으나 마나였다는 뜻이다. 지금 곡선(지수)에서 Lv N 요구치가
+    // 9·1.115^(N-1) 이므로, 잔해 하나가 그 시점 한 레벨의 30~40% 는 돼야
+    // "파러 갈 이유"가 된다.
+    const value = (10 + this.act * 6) * (1 + this.player.level * 0.55)
     for (let k = 0; k < 7; k++) {
       const a = this.rng.next() * Math.PI * 2
       const sp = 60 + this.rng.next() * 140

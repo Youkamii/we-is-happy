@@ -34,6 +34,10 @@ interface RunStat {
   level: number
   weapons: number
   evolved: number
+  /** 파낸 잔해 수 — 만든 걸 실제로 쓰는지 재는 값 */
+  caches: number
+  /** 도달한 막 (1-based) */
+  act: number
 }
 
 /**
@@ -64,6 +68,7 @@ function playRun(seed: number, pickBest = false): RunStat {
   const input = { move: bot.move } as unknown as Input
   const dt = 1 / 60
   const maxSteps = Math.ceil(RUN_SECONDS / dt) + 120
+  const cache0 = game.terrain.cacheCount()
 
   for (let i = 0; i < maxSteps; i++) {
     if (game.phase === Phase.LevelUp) {
@@ -85,6 +90,8 @@ function playRun(seed: number, pickBest = false): RunStat {
     level: game.player.level,
     weapons: game.loadout.weapons.length,
     evolved: game.loadout.weapons.filter((w) => w.evolved).length,
+    caches: cache0 - game.terrain.cacheCount(),
+    act: game.act + 1,
   }
 }
 
@@ -106,8 +113,8 @@ describe.skipIf(!RUN_SIM)('밸런스 (봇 자동 플레이)', () => {
     const table = runs
       .map((r) =>
         `  seed ${String(r.seed).padStart(5)} | ${r.won ? '완주' : '사망'} ${r.survived.toFixed(0).padStart(3)}s` +
-        ` | ${String(r.kills).padStart(5)}킬 | Lv${String(r.level).padStart(2)}` +
-        ` | 무기${r.weapons} 진화${r.evolved}`,
+        ` | ${r.act}막 | ${String(r.kills).padStart(6)}킬 | Lv${String(r.level).padStart(3)}` +
+        ` | 무기${r.weapons} 진화${r.evolved} 잔해${r.caches}`,
       )
       .join('\n')
     // vitest 의 console 캡처를 타지 않고 직접 쓴다 (수집 단계 로그가 삼켜진 적이 있다)
@@ -115,7 +122,7 @@ describe.skipIf(!RUN_SIM)('밸런스 (봇 자동 플레이)', () => {
       `\n── 밸런스 (봇 ${runs.length}판) ──\n${table}\n` +
       `  완주 ${wins}/${runs.length} | 평균 생존 ${avg((r) => r.survived).toFixed(0)}s` +
       ` | 평균 ${avg((r) => r.kills).toFixed(0)}킬 | 평균 Lv${avg((r) => r.level).toFixed(1)}` +
-      ` | 평균 진화 ${avg((r) => r.evolved).toFixed(1)}\n\n`,
+      ` | 평균 진화 ${avg((r) => r.evolved).toFixed(1)} | 평균 잔해 ${avg((r) => r.caches).toFixed(1)}\n\n`,
     )
     expect(runs.length).toBe(SEEDS.length)
   })
@@ -127,6 +134,11 @@ describe.skipIf(!RUN_SIM)('밸런스 (봇 자동 플레이)', () => {
   it('레벨이 오른다 (성장이 멈추면 조합이 안 굴러간다)', () => {
     const avgLv = runs.reduce((a, r) => a + r.level, 0) / runs.length
     expect(avgLv).toBeGreaterThan(6)
+  })
+
+  it('잔해가 실제로 파인다 (만들어 놓고 아무도 안 쓰면 없는 기능이다)', () => {
+    const total = runs.reduce((a, r) => a + r.caches, 0)
+    expect(total, '6판 합계 잔해').toBeGreaterThan(0)
   })
 })
 
