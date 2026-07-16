@@ -4,6 +4,7 @@
  * 고정 타임스텝으로 시뮬레이션을 돌린다. 가변 dt 를 쓰면 프레임률에 따라
  * 밸런스가 달라지고, 협동에서 두 대의 결과가 갈린다.
  */
+import type { SfxName } from '../engine/audio'
 import { Camera } from '../engine/camera'
 import { SpatialHash } from '../engine/grid'
 import type { Input } from '../engine/input'
@@ -71,6 +72,17 @@ export class Game implements FireCtx {
   pendingChoices: Choice[] = []
   /** 레벨업이 한 번에 여러 번 터졌을 때 밀린 횟수 */
   private pendingLevels = 0
+  /**
+   * 이번 프레임에 낼 소리. Game 이 Audio 를 직접 들면 시뮬레이션이 브라우저에
+   * 묶여서 테스트가 안 돈다 — 큐에 쌓고 main 이 소비한다.
+   */
+  readonly sfxQueue: SfxName[] = []
+
+  /** FireCtx — 무기 코드가 소리를 요청하는 통로 */
+  sfx(name: SfxName): void {
+    // 후반에 초당 수백 개가 쌓이면 그것대로 낭비다. 오디오 쪽 스로틀이 어차피 걸러낸다.
+    if (this.sfxQueue.length < 24) this.sfxQueue.push(name)
+  }
 
   /** FireCtx — 무기 코드가 읽는 시간 */
   get time(): number {
@@ -105,6 +117,12 @@ export class Game implements FireCtx {
   /** 레벨업 선택 확정. UI 가 부른다. */
   choose(choice: Choice): void {
     this.loadout.apply(choice, this.player)
+    if (choice.kind === 'evolve') {
+      this.sfx('evolve')
+      shockwave(this.motes, this.player.x, this.player.y, 220, choice.r, choice.g, choice.b, 0.9)
+      burst(this.motes, this.player.x, this.player.y, 60, choice.r, choice.g, choice.b, 460, 1.0, 8, Shape.Star)
+      this.camera.shake(14, 8)
+    }
     this.pendingLevels--
     if (this.pendingLevels > 0) {
       this.pendingChoices = this.loadout.roll(this.rng)
@@ -167,6 +185,7 @@ export class Game implements FireCtx {
 
     if (res.contactDamage > 0 && this.player.hurt(res.contactDamage * 2.2)) {
       this.camera.shake(9, 12)
+      this.sfx('hurt')
     }
     if (!this.player.alive) {
       this.onDeath()
@@ -181,6 +200,7 @@ export class Game implements FireCtx {
 
     if (this.elapsed >= RUN_SECONDS) {
       this.phase = Phase.Won
+      this.sfx('win')
     }
   }
 
@@ -376,6 +396,7 @@ export class Game implements FireCtx {
     foes.hp[j]! -= dmg
     foes.flash[j] = 0.09
     this.player.damageDealt += dmg
+    this.sfx('hit')
 
     // 넉백 — 무게가 무거울수록 덜 밀린다
     const stat = FOE_STATS[foes.type[j]!]!
@@ -395,9 +416,11 @@ export class Game implements FireCtx {
 
     // 화면에 2만 마리가 죽는 후반에 파티클을 그대로 뿌리면 풀이 순식간에 마른다.
     // 큰 적일수록 많이, 잔챙이는 적게.
-    const n = stat.radius > 16 ? 14 : 5
+    const big = stat.radius > 16
+    const n = big ? 14 : 5
     burst(this.motes, x, y, n, stat.r, stat.g, stat.b, 210, 0.34, 4)
-    if (stat.radius > 16) shockwave(this.motes, x, y, stat.radius * 2.2, stat.r, stat.g, stat.b, 0.3)
+    if (big) shockwave(this.motes, x, y, stat.radius * 2.2, stat.r, stat.g, stat.b, 0.3)
+    this.sfx(big ? 'bigKill' : 'kill')
 
     this.drops.spawn(
       x, y,
@@ -449,6 +472,7 @@ export class Game implements FireCtx {
         const type = drops.type[i]!
         if (type === Drop.Xp) {
           leveled += p.gainXp(drops.value[i]!)
+          this.sfx('pickup')
         } else if (type === Drop.Heal) {
           p.heal(drops.value[i]!)
           shockwave(this.motes, p.x, p.y, 40, 0.4, 2.4, 1.0, 0.35)
@@ -464,11 +488,13 @@ export class Game implements FireCtx {
       shockwave(this.motes, p.x, p.y, 70, 2.6, 2.2, 0.8, 0.5)
       burst(this.motes, p.x, p.y, 26, 2.6, 2.1, 0.7, 300, 0.7, 6, Shape.Star)
       this.camera.shake(5, 14)
+      this.sfx('levelup')
     }
   }
 
   private onDeath(): void {
     this.phase = Phase.Dead
+    this.sfx('death')
     burst(this.motes, this.player.x, this.player.y, 90, 2.6, 0.5, 0.3, 420, 1.2, 9)
     shockwave(this.motes, this.player.x, this.player.y, 180, 2.6, 0.4, 0.3, 0.9)
     this.camera.shake(26, 5)

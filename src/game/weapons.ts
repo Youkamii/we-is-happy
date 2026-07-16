@@ -6,6 +6,7 @@
  *
  * game.ts 를 import 하지 않는다(순환 참조). 필요한 것은 FireCtx 로 받는다.
  */
+import type { SfxName } from '../engine/audio'
 import type { SpatialHash } from '../engine/grid'
 import type { Rng } from '../engine/rng'
 import { Shape } from '../engine/shapes'
@@ -27,6 +28,7 @@ export interface FireCtx {
   foesInRadius(x: number, y: number, r: number, out: Int32Array): number
   damageFoe(j: number, damage: number, fromVx: number, fromVy: number): void
   shake(amount: number, decay?: number): void
+  sfx(name: SfxName): void
 }
 
 export const W = {
@@ -219,6 +221,7 @@ function fireEmber(slot: WeaponSlot, ctx: FireCtx): void {
       0, ctx.rng.next(),
     )
   }
+  ctx.sfx('shoot')
 }
 
 // ── 호 / 회오리 ────────────────────────────────────────────────────────
@@ -267,6 +270,7 @@ function fireArc(slot: WeaponSlot, ctx: FireCtx): void {
   }
   slot.phase += 0.9
   ctx.shake(slot.evolved ? 3 : 1.6, 16)
+  ctx.sfx('blade')
 }
 
 // ── 번개 / 폭풍 ────────────────────────────────────────────────────────
@@ -313,7 +317,10 @@ function fireBolt(slot: WeaponSlot, ctx: FireCtx): void {
     // 진화하면 튈 때마다 세진다
     if (slot.evolved) dmg *= 1.16
   }
-  if (used > 0) ctx.shake(2.2, 18)
+  if (used > 0) {
+    ctx.shake(2.2, 18)
+    ctx.sfx('bolt')
+  }
 }
 
 /** 체인이 방문한 적. 모듈 레벨 버퍼 — 단일 스레드라 안전하다. */
@@ -400,6 +407,7 @@ function fireNova(slot: WeaponSlot, ctx: FireCtx): void {
   ctx.motes.spawn(p.x, p.y, 0, 0, 0.5, radius * (slot.evolved ? 0.5 : 1), def.r, def.g, def.b, Shape.Ring, 0, 0, 1)
   spray(ctx.motes, p.x, p.y, 1, 0, 6.283, 18, def.r, def.g, def.b, slot.evolved ? -260 : 340, 0.5, 5)
   ctx.shake(slot.evolved ? 7 : 5, 12)
+  ctx.sfx('nova')
 }
 
 // ── 가시 / 덤불 ────────────────────────────────────────────────────────
@@ -436,6 +444,7 @@ function fireThorn(slot: WeaponSlot, ctx: FireCtx): void {
       0, ctx.rng.next(),
     )
   }
+  ctx.sfx('shoot')
 }
 
 /**

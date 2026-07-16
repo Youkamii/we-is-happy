@@ -1,6 +1,7 @@
 /**
  * 엔트리. 부팅 → 게임 루프 → HUD.
  */
+import { Audio } from './engine/audio'
 import { createContext, GLError } from './engine/gl'
 import { Input } from './engine/input'
 import { Renderer } from './engine/renderer'
@@ -32,6 +33,15 @@ function boot(): void {
   const renderer = new Renderer(canvas, gl)
   const input = new Input(canvas)
   const game = new Game()
+  const audio = new Audio()
+
+  // 자동재생 정책: 사용자 제스처 전에는 오디오 컨텍스트가 suspended 로 태어난다.
+  const wake = () => {
+    audio.start()
+    audio.resume()
+  }
+  window.addEventListener('pointerdown', wake, { once: true })
+  window.addEventListener('keydown', wake, { once: true })
 
   const params = new URLSearchParams(location.search)
   const daily = dailySeed(new Date())
@@ -42,6 +52,12 @@ function boot(): void {
   // ?bench=10000 — 적을 즉시 N마리 풀어 성능만 본다.
   const bench = Math.min(20000, Math.max(0, parseInt(params.get('bench') ?? '0', 10) || 0))
   if (bench > 0) game.benchSpawn(bench)
+  // ?auto — 레벨업을 자동으로 골라 사람 없이 완주시킨다 (검증용)
+  const autoPick = params.has('auto')
+
+  // 콘솔에서 만져볼 수 있게 열어 둔다. 싱글플레이 게임이라 숨길 이유가 없고,
+  // 이게 있어야 headless 검증도 되고 밸런싱도 콘솔에서 바로 실험할 수 있다.
+  ;(window as unknown as Record<string, unknown>)['EMBERTIDE'] = { game, audio, renderer, input }
 
   const ui = document.getElementById('ui')!
   const levelUp = new LevelUpUI(ui)
@@ -80,8 +96,15 @@ function boot(): void {
     input.update()
 
     // 레벨업: 선택지가 떠 있는 동안 시뮬레이션은 멈춘다 (game.update 가 알아서 건너뛴다)
-    if (game.phase === Phase.LevelUp && !levelUp.isVisible && game.pendingChoices.length > 0) {
-      levelUp.show(game.pendingChoices, game.player.level, (c) => game.choose(c))
+    if (game.phase === Phase.LevelUp && game.pendingChoices.length > 0) {
+      if (autoPick) {
+        // ?auto — 사람 없이 5분 완주를 돌려 보기 위한 모드. 진화가 있으면 진화를 집는다.
+        const cs = game.pendingChoices
+        const evo = cs.find((c) => c.kind === 'evolve')
+        game.choose(evo ?? cs[Math.floor(Math.random() * cs.length)]!)
+      } else if (!levelUp.isVisible) {
+        levelUp.show(game.pendingChoices, game.player.level, (c) => game.choose(c))
+      }
     }
 
     if (game.phase === Phase.Dead || game.phase === Phase.Won) {
@@ -92,9 +115,20 @@ function boot(): void {
       }
     }
 
+    if (input.consumePressed('m')) audio.setMuted(!audio.muted)
+
     renderer.resize()
     game.update(input, dt)
     game.render(renderer)
+
+    // 소리: 게임이 쌓아둔 이벤트를 흘려보낸다 (스로틀·보이스 상한은 Audio 가 건다)
+    if (game.sfxQueue.length > 0) {
+      for (let i = 0; i < game.sfxQueue.length; i++) audio.play(game.sfxQueue[i]!)
+      game.sfxQueue.length = 0
+    }
+    // 음악 압박도 = 런 진행도. 마지막 1분이 다른 곡처럼 들려야 한다.
+    audio.intensity = game.phase === Phase.Playing ? Math.min(1, game.elapsed / RUN_SECONDS) : 0
+    audio.updateMusic(dt)
 
     const p = game.player
     const hpPct = Math.round((p.hp / p.stats.maxHp) * 100)
