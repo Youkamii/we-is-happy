@@ -92,20 +92,34 @@ function empty(): Records {
   return { best: {}, allTime: 0, runs: 0, totalKills: 0 }
 }
 
+/** 유한한 숫자만 통과. NaN·Infinity·문자열·객체는 전부 버린다. */
+function num(v: unknown, fallback = 0): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
 export function loadRecords(): Records {
   try {
     const raw = localStorage.getItem(KEY)
     if (!raw) return empty()
-    const parsed = JSON.parse(raw) as Partial<Records>
+    const parsed = JSON.parse(raw) as unknown
     // 손상된 저장본으로 게임이 죽으면 안 된다 — 모양이 이상하면 조용히 버린다.
-    if (!parsed || typeof parsed !== 'object' || typeof parsed.best !== 'object' || parsed.best === null) {
-      return empty()
+    if (!parsed || typeof parsed !== 'object') return empty()
+    const p = parsed as Record<string, unknown>
+    if (!p['best'] || typeof p['best'] !== 'object' || Array.isArray(p['best'])) return empty()
+
+    // **값까지 검사한다.** 껍데기(typeof === 'object')만 보면 best 의 값이 문자열일 수
+    // 있고, 그게 화면으로 흘러가면 오염된 localStorage 가 영구 XSS 로 굳는다
+    // (isBest 비교 `12345 > "<img...>"` 가 false 라 덮어써지지도 않는다).
+    // 결과 화면이 이제 textContent 라 그 경로는 닫혔지만, 여기서도 막는 게 옳다.
+    const best: Record<string, number> = {}
+    for (const [k, v] of Object.entries(p['best'] as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) best[k] = v
     }
     return {
-      best: parsed.best as Record<string, number>,
-      allTime: typeof parsed.allTime === 'number' ? parsed.allTime : 0,
-      runs: typeof parsed.runs === 'number' ? parsed.runs : 0,
-      totalKills: typeof parsed.totalKills === 'number' ? parsed.totalKills : 0,
+      best,
+      allTime: num(p['allTime']),
+      runs: num(p['runs']),
+      totalKills: num(p['totalKills']),
     }
   } catch {
     return empty()

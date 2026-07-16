@@ -94,10 +94,20 @@ export class LevelUpUI {
         `font:700 11px/1 ui-monospace,monospace;color:${accent};opacity:.75;letter-spacing:.2em;`
       card.appendChild(key)
 
+      // innerHTML 을 쓰지 않는다. 지금은 c.title 이 정적 테이블에서만 오지만,
+      // 협동이 붙으면 상대 피어의 로드아웃 이름이 여기로 들어올 수 있다.
       const name = document.createElement('div')
+      const titleEl = document.createElement('span')
+      titleEl.textContent = c.title
+      titleEl.style.cssText = `font:700 19px/1.3 ui-monospace,monospace;color:${accent}`
+      name.appendChild(titleEl)
       const lvTag = c.kind === 'evolve' ? '진화' : c.level > 1 ? `Lv ${c.level}` : c.kind === 'heal' ? '' : 'NEW'
-      name.innerHTML = `<span style="font:700 19px/1.3 ui-monospace,monospace;color:${accent}">${c.title}</span>` +
-        (lvTag ? ` <span style="font-size:11px;opacity:.6">${lvTag}</span>` : '')
+      if (lvTag) {
+        const tagEl = document.createElement('span')
+        tagEl.textContent = ` ${lvTag}`
+        tagEl.style.cssText = 'font-size:11px;opacity:.6'
+        name.appendChild(tagEl)
+      }
       card.appendChild(name)
 
       const desc = document.createElement('div')

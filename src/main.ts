@@ -15,6 +15,57 @@ const GRADE_COLOR: Record<string, string> = {
   'S+': '#ffe27a', S: '#ffd166', A: '#8affc1', B: '#7de3ff', C: '#b9c6d6', D: '#8d9aab', E: '#6b7787',
 }
 
+/**
+ * 결과 화면. **innerHTML 을 쓰지 않는다.**
+ *
+ * 여기 들어가는 seedLabel 은 URL 쿼리(?seed=...)에서 오고, prevBest 는 localStorage
+ * 에서 온다 — 둘 다 공격자가 정할 수 있다. 예전엔 이걸 템플릿 문자열로 innerHTML 에
+ * 넣었는데, 5분이면 판이 반드시 끝나므로 `?seed=<img src=x onerror=...>` 링크 하나로
+ * 100% 실행됐다(rAF 안이라 초당 60회). 이스케이프 함수를 끼우는 것보다 textContent
+ * 로 조립하는 게 근본적이다 — 다음 사람이 필드를 하나 더 추가해도 안전하다.
+ */
+function renderResult(
+  root: HTMLElement,
+  result: RunResult,
+  prevBest: number,
+  isBest: boolean,
+  seedLabel: string,
+): void {
+  root.replaceChildren()
+  const line = (text: string, style: string): void => {
+    const d = document.createElement('div')
+    d.textContent = text
+    d.style.cssText = style
+    root.appendChild(d)
+  }
+
+  line(result.won ? '버텨냈다' : '꺼졌다', 'font-size:38px;letter-spacing:.14em')
+  line(
+    result.grade,
+    `margin-top:18px;font-size:74px;line-height:1;color:${GRADE_COLOR[result.grade] ?? '#ffd9a8'}`,
+  )
+  line(result.score.toLocaleString(), 'margin-top:10px;font-size:26px')
+  line(
+    isBest ? '이 시드 신기록' : `최고 ${prevBest.toLocaleString()}`,
+    `margin-top:6px;font-size:14px;color:${isBest ? '#8affc1' : '#7d90a8'}`,
+  )
+
+  const stats = document.createElement('div')
+  stats.style.cssText = 'margin-top:22px;font-size:14px;color:#a9bdd4;line-height:1.9'
+  const put = (text: string, color?: string): void => {
+    const s = document.createElement('div')
+    s.textContent = text
+    if (color) s.style.color = color
+    stats.appendChild(s)
+  }
+  put(`${fmtTime(result.survived)} 버팀 · ${result.kills.toLocaleString()} 처치 · Lv ${result.level}`)
+  put(result.weapons.join(' · ') || '맨손')
+  put(seedLabel, '#6f8299')
+  root.appendChild(stats)
+
+  line('R — 다시', 'margin-top:24px;font-size:15px;color:#ffb066')
+}
+
 function fatal(msg: string): void {
   const el = document.getElementById('fatal')
   const m = document.getElementById('fatal-msg')
@@ -50,7 +101,9 @@ function boot(): void {
 
   const params = new URLSearchParams(location.search)
   const daily = dailySeed(new Date())
-  const seedParam = params.get('seed')
+  // 시드는 화면에도 뜨고 localStorage 키도 되므로 길이를 자른다.
+  // (긴 문자열로 저장 쿼터를 채워 기록을 못 남기게 만드는 것도 막는다)
+  const seedParam = params.get('seed')?.slice(0, 32) || null
   const seed = seedParam ? hashSeed(seedParam) : daily.seed
   // 기록은 시드별로 남는다. 데일리는 날짜가 곧 라벨이라 매일 새 판이 열린다.
   const seedLabel = seedParam ? `seed:${seedParam}` : daily.label
@@ -89,6 +142,7 @@ function boot(): void {
   let result: RunResult | null = null
   let records = loadRecords()
   let isBest = false
+  let resultShown = false
 
   function frame(now: number): void {
     const dt = Math.min((now - last) / 1000, 0.25)
@@ -109,9 +163,11 @@ function boot(): void {
     if (game.phase === Phase.LevelUp && game.pendingChoices.length > 0) {
       if (autoPick) {
         // ?auto — 사람 없이 5분 완주를 돌려 보기 위한 모드. 진화가 있으면 진화를 집는다.
+        // 난수는 game.rng 를 쓴다. Math.random 을 쓰면 같은 시드로 열어도 매번 다른
+        // 빌드가 나와서, 결정론을 확인하려고 만든 모드가 결정론을 깨는 꼴이 된다.
         const cs = game.pendingChoices
         const evo = cs.find((c) => c.kind === 'evolve')
-        game.choose(evo ?? cs[Math.floor(Math.random() * cs.length)]!)
+        game.choose(evo ?? cs[game.rng.int(cs.length)]!)
       } else if (!levelUp.isVisible) {
         levelUp.show(game.pendingChoices, game.player.level, (c) => game.choose(c))
       }
@@ -166,28 +222,19 @@ function boot(): void {
       `적 ${game.foes.count.toLocaleString()}  탄 ${game.shots.count}  입자 ${game.motes.count.toLocaleString()}\n` +
       `fps ${fps.toFixed(0)}`
 
-    if (result) {
-      const prevBest = records.best[seedLabel] ?? 0
+    // 결과 화면은 판이 끝난 순간 한 번만 조립한다. 예전엔 rAF 마다 innerHTML 을
+    // 통째로 재파싱했다 — 초당 60번 DOM 을 새로 짓는 건 그냥 낭비다.
+    if (result && !resultShown) {
+      resultShown = true
       // 뒤에서 화면이 계속 불타고 있어서 오버레이 없이는 글자가 안 읽힌다.
       center.style.background = 'radial-gradient(ellipse at center,rgba(4,6,12,.86),rgba(2,3,7,.97))'
       center.style.backdropFilter = 'blur(3px)'
-      center.innerHTML =
-        `<div style="font-size:38px;letter-spacing:.14em">${result.won ? '버텨냈다' : '꺼졌다'}</div>` +
-        `<div style="margin-top:18px;font-size:74px;line-height:1;color:${GRADE_COLOR[result.grade] ?? '#ffd9a8'}">${result.grade}</div>` +
-        `<div style="margin-top:10px;font-size:26px">${result.score.toLocaleString()}</div>` +
-        (isBest
-          ? '<div style="margin-top:6px;font-size:14px;color:#8affc1">이 시드 신기록</div>'
-          : `<div style="margin-top:6px;font-size:14px;color:#7d90a8">최고 ${prevBest.toLocaleString()}</div>`) +
-        `<div style="margin-top:22px;font-size:14px;color:#a9bdd4;line-height:1.9">` +
-        `${fmtTime(result.survived)} 버팀 · ${result.kills.toLocaleString()} 처치 · Lv ${result.level}<br>` +
-        `${result.weapons.join(' · ') || '맨손'}<br>` +
-        `<span style="color:#6f8299">${seedLabel}</span>` +
-        `</div>` +
-        `<div style="margin-top:24px;font-size:15px;color:#ffb066">R — 다시</div>`
-    } else {
+      renderResult(center, result, records.best[seedLabel] ?? 0, isBest, seedLabel)
+    } else if (!result && resultShown) {
+      resultShown = false
       center.style.background = 'none'
       center.style.backdropFilter = 'none'
-      center.innerHTML = ''
+      center.replaceChildren()
     }
 
     input.endFrame()
