@@ -426,8 +426,9 @@ function fireComet(slot: WeaponSlot, ctx: FireCtx): void {
 function fireSigil(slot: WeaponSlot, ctx: FireCtx): void {
   const p = ctx.player
   const s = p.stats
-  // 지나온 자리에 새긴다 — 움직임이 곧 배치다
-  const radius = (54 + slot.level * 5) * s.area * s.blast
+  // 지나온 자리에 새긴다 — 움직임이 곧 배치다.
+  // 반경이 크면 플레이어 주변이 흰 링으로 덮여 정작 피해야 할 적이 안 보인다(실측).
+  const radius = (34 + slot.level * 3.4) * s.area * s.blast
   const power = (18 + slot.level * 9) * s.damage
   ctx.placeField(Field.Sigil, p.x, p.y, radius, power, slot.evolved ? 7 : 4.5)
   ctx.sfx('pickup')

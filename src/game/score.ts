@@ -3,6 +3,7 @@
  *
  * 5분이 끝나면 숫자 하나가 남아야 한다. 그래야 "한 판 더"가 생긴다.
  */
+import { ACTS } from './acts'
 import { dailySeed } from '../engine/rng'
 import type { Game } from './game'
 import { RUN_SECONDS } from './game'
@@ -12,6 +13,9 @@ export interface RunResult {
   seedLabel: string
   score: number
   grade: string
+  /** 어느 막까지 갔나 (1-based) */
+  act: number
+  actName: string
   survived: number
   won: boolean
   kills: number
@@ -34,19 +38,25 @@ export function computeScore(g: Game): number {
   s += Math.floor(g.elapsed) * 24
   s += p.level * 140
   s += g.loadout.weapons.filter((w) => w.evolved).length * 1600
-  if (g.elapsed >= RUN_SECONDS) s += 6000
+  // 막을 넘길 때마다 크게 — 15분에서 "어디까지 갔나"가 곧 실력이다
+  s += g.act * 3500
+  if (g.elapsed >= RUN_SECONDS) s += 20000
   // 맞을수록 깎이되 바닥은 있다. 감점이 무한하면 겁쟁이 플레이가 정답이 된다.
-  s -= Math.min(4000, Math.floor(p.damageTaken * 4))
+  s -= Math.min(6000, Math.floor(p.damageTaken * 4))
   return Math.max(0, Math.floor(s))
 }
 
+/**
+ * 등급 문턱. 15분·12무기로 늘어나며 점수 규모가 3배쯤 커졌다
+ * (봇 실측 178,000킬 → 처치 점수만 200만). 문턱도 같이 올려야 S 가 S 로 남는다.
+ */
 const GRADES: readonly [number, string][] = [
-  [42000, 'S+'],
-  [30000, 'S'],
-  [21000, 'A'],
-  [14000, 'B'],
-  [8000, 'C'],
-  [3500, 'D'],
+  [1600000, 'S+'],
+  [900000, 'S'],
+  [450000, 'A'],
+  [180000, 'B'],
+  [60000, 'C'],
+  [15000, 'D'],
   [0, 'E'],
 ]
 
@@ -61,6 +71,8 @@ export function makeResult(g: Game, seedLabel: string): RunResult {
     seedLabel,
     score,
     grade: gradeOf(score),
+    act: g.act + 1,
+    actName: ACTS[g.act]!.name,
     survived: g.elapsed,
     won: g.elapsed >= RUN_SECONDS,
     kills: g.player.kills,

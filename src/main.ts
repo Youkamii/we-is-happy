@@ -59,7 +59,8 @@ function renderResult(
     if (color) s.style.color = color
     stats.appendChild(s)
   }
-  put(`${fmtTime(result.survived)} 버팀 · ${result.kills.toLocaleString()} 처치 · Lv ${result.level}`)
+  put(`${result.act}막 ${result.actName} · ${fmtTime(result.survived)} 버팀`)
+  put(`${result.kills.toLocaleString()} 처치 · Lv ${result.level}`)
   put(result.weapons.join(' · ') || '맨손')
   put(seedLabel, '#6f8299')
   root.appendChild(stats)

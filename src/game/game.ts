@@ -1022,9 +1022,11 @@ export class Game implements FireCtx {
           break
         }
         case Field.Sigil: {
-          const a = 0.35 + frac * 0.65
-          b.push(x, y, r * 1.1, seed * 6.283 + t * 0.4, 2.2 * a, 1.9 * a, 0.5 * a, 1, Shape.Sigil)
-          if (evo) b.push(x, y, r * 0.5, -t * 1.2, 2.4 * a, 2.0 * a, 0.6 * a, 1, Shape.Rune)
+          // 문양은 바닥에 새겨진 것이라 옅어야 한다 — 밝게 그렸더니 화면 중앙이
+          // 흰 링으로 덮여서 적이 안 보였다.
+          const a = (0.2 + frac * 0.4) * 0.7
+          b.push(x, y, r * 1.1, seed * 6.283 + t * 0.4, 1.5 * a, 1.3 * a, 0.35 * a, 1, Shape.Sigil)
+          if (evo) b.push(x, y, r * 0.5, -t * 1.2, 1.7 * a, 1.4 * a, 0.4 * a, 1, Shape.Rune)
           break
         }
         case Field.Still: {

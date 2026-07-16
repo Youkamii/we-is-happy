@@ -123,15 +123,17 @@ describe('밸런스 (빠른 것만)', () => {
     expect(firsts.size).toBeGreaterThanOrEqual(4)
   })
 
-  it('아무것도 안 하면 5분을 못 버틴다 (가만히 서 있어도 이기면 게임이 아니다)', () => {
+  it('아무것도 안 하면 완주하지 못한다 (가만히 서 있어도 이기면 게임이 아니다)', () => {
     const game = new Game()
     game.start(3)
     const input = { move: { x: 0, y: 0 } } as unknown as Input
     // 스텝 수로 돌면 레벨업 처리(continue)가 게임 시간을 안 쓰면서 예산만 먹는다.
     // 실제로 그것 때문에 5분을 못 채우고 Playing 인 채로 루프가 끝났다.
+    // guard 는 런 길이(900초 × 60)보다 넉넉해야 한다. 400*60 으로 뒀더니 15분
+    // 확장 후 '루프가 안 끝난다'로 터졌다 — 게임이 아니라 상한이 낡은 것이었다.
     let guard = 0
     while (game.phase === Phase.Playing || game.phase === Phase.LevelUp) {
-      if (guard++ > 400 * 60) throw new Error('루프가 안 끝난다')
+      if (guard++ > (RUN_SECONDS + 60) * 60) throw new Error('루프가 안 끝난다')
       if (game.phase === Phase.LevelUp) {
         game.choose(game.pendingChoices[0]!)
         continue

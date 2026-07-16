@@ -102,15 +102,17 @@ void main() {
   // fbm 은 평균 0.5 근처에 몰린다. 두 층을 그냥 곱하고 pow 를 세게 걸면 결과가
   // 거의 0이라 성운이 아예 안 보인다(실측). 하나를 주 밀도로 쓰고 다른 하나로
   // 구멍을 뚫는 방식이 필라멘트를 만들면서 밝기를 유지한다.
-  float density = smoothstep(0.38, 0.72, n1);
+  // 배경은 배경이어야 한다. 성운을 밝게 잡았더니 지형과 적을 덮어서 정작 피해야 할
+  // 것이 안 보였다 — bloom 이 이 위에 또 얹히므로 여기 값은 아주 낮아야 한다.
+  float density = smoothstep(0.42, 0.78, n1);
   float holes = smoothstep(0.28, 0.62, n2);
   float neb = density * (0.35 + holes * 0.65);
   vec3 nebCol = mix(u_tintA, u_tintB, clamp(n2 * 1.3, 0.0, 1.0));
-  col += nebCol * neb * (0.85 + u_intensity * 1.6);
+  col += nebCol * neb * (0.16 + u_intensity * 0.34);
 
   // 성운 속 밝은 심(seam) — 필라멘트 가장자리가 빛난다
-  float edge = pow(clamp(1.0 - abs(n1 - 0.55) * 9.0, 0.0, 1.0), 2.0);
-  col += nebCol * edge * (0.3 + u_intensity * 0.7);
+  float edge = pow(clamp(1.0 - abs(n1 - 0.58) * 11.0, 0.0, 1.0), 2.0);
+  col += nebCol * edge * (0.09 + u_intensity * 0.2);
 
   // ── 별: 3겹 시차. 가까운 겹일수록 빠르게 흐른다(스케일이 크다 = 셀이 촘촘하다).
   float stars = 0.0;
@@ -118,7 +120,7 @@ void main() {
   stars += starLayer(world * 0.011, 7.3, 0.03) * 0.7;
   stars += starLayer(world * 0.006, 19.1, 0.022) * 0.45; // 멀다 — 느리고 잘다
   // 별빛은 살짝 푸르게, 성운 안에서는 가려진다
-  col += vec3(0.8, 0.88, 1.0) * stars * (1.0 - neb * 0.45) * 1.6;
+  col += vec3(0.8, 0.88, 1.0) * stars * (1.0 - neb * 0.35) * 1.3;
 
   // ── 비네트 대신 아주 옅은 중심 발광 (플레이어가 있는 곳)
   float r = length(v_uv * vec2(u_aspect, 1.0));
