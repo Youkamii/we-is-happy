@@ -154,7 +154,7 @@ export class WeaponSlot {
   constructor(readonly def: number) {}
 }
 
-const hitBuf = new Int32Array(1024)
+const hitBuf = new Int32Array(4096)
 const chainBuf = new Int32Array(256)
 
 /**
@@ -218,7 +218,7 @@ function fireEmber(slot: WeaponSlot, ctx: FireCtx): void {
       (dx * c - dy * sn) * speed, (dx * sn + dy * c) * speed,
       1.15, dmg, pierce, (7 + slot.level * 0.5) * s.area,
       slot.evolved ? 128 + W.Ember : W.Ember,
-      0, ctx.rng.next(),
+      ctx.rng.next(),
     )
   }
   ctx.sfx('shoot')
@@ -345,6 +345,12 @@ function drawBolt(
       0, 0, 0.16, 9, r, g, b, Shape.Spark, 0, Math.atan2(dy, dx), 1,
     )
   }
+  // 착탄 지점에 번개 문양 하나. 아틀라스에 Bolt 셀을 구워 놓고 아무 데서도 안 써서
+  // 이 게임에 존재하지 않는 그림이었다.
+  ctx.motes.spawn(
+    x1, y1, 0, 0, 0.22, 30, r * 1.2, g * 1.2, b, Shape.Bolt,
+    0, Math.atan2(dy, dx) - Math.PI * 0.5, 1,
+  )
 }
 
 // ── 위성 / 후광 ────────────────────────────────────────────────────────
@@ -441,7 +447,7 @@ function fireThorn(slot: WeaponSlot, ctx: FireCtx): void {
       dmg * boost, s.pierce + (slot.evolved ? 3 : 0),
       (5 + slot.level * 0.4) * s.area,
       slot.evolved ? 128 + W.Thorn : W.Thorn,
-      0, ctx.rng.next(),
+      ctx.rng.next(),
     )
   }
   ctx.sfx('shoot')

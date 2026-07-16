@@ -54,14 +54,26 @@ export class Game implements FireCtx {
   rng = new Rng(1)
   private acc = 0
   private spawnTimer = 0
-  /** 관통탄이 같은 적을 반복 타격하는 걸 막는 단조 증가 스탬프 */
-  private hitStamp = 1
+  /**
+   * "이 탄이 이 적을 이미 때렸다"는 표시. 값은 탄의 고유 stamp(Shots 가 발급).
+   *
+   * 예전엔 스텝마다 새 stamp 를 발급했는데, 그러면 스텝 간 재타격을 전혀 막지 못한다.
+   * 탄 속도 640px/s = 스텝당 10.7px 이고 Eye 반경이 27이라, 관통탄 하나가 같은 적을
+   * 7스텝 연속으로 때려서 pierce 를 혼자 다 소진했다 — "관통"이 "단일 대상 3연타"로
+   * 동작하고 있었다.
+   */
   private readonly foeStamp = new Int32Array(MAX_FOES)
-  private readonly queryBuf = new Int32Array(512)
+  /**
+   * 공간 질의 스크래치. 크기가 곧 사거리 상한이다 —
+   * SpatialHash.query 는 cap 에 닿으면 **말없이** 자르고, 셀을 좌하단부터 훑으므로
+   * 잘리는 쪽은 항상 우상단이다. 512 였을 때 신성(개화 8레벨 → 반경 598, 576셀)이
+   * 화면엔 거대한 링을 그리면서 실제로는 왼쪽 아래 적만 때렸다.
+   */
+  private readonly queryBuf = new Int32Array(4096)
   /** 한 스텝에 화상으로 죽는 적을 담는 버퍼 */
   private readonly deadBuf = new Int32Array(2048)
-  /** 불이 옮겨붙을 후보 */
-  private readonly spreadBuf = new Int32Array(64)
+  /** 불이 옮겨붙을 후보. queryBuf 와 반드시 별개여야 한다 (ignite 주석 참고). */
+  private readonly spreadBuf = new Int32Array(256)
   /** 스폰 함수에 넘길 난수원. 매 스폰마다 클로저를 새로 만들지 않으려고 붙잡아 둔다. */
   private readonly randFn = (): number => this.rng.next()
   /** 지형 충돌 결과를 받는 스크래치 */
@@ -102,7 +114,6 @@ export class Game implements FireCtx {
     this.motes.clear()
     this.drops.clear()
     this.foeStamp.fill(0)
-    this.hitStamp = 1
     this.acc = 0
     this.spawnTimer = 0
     this.elapsed = 0
@@ -160,6 +171,17 @@ export class Game implements FireCtx {
       this.step(input, STEP)
       this.acc -= STEP
       steps++
+      // **phase 가 바뀌면 즉시 멈춘다.** 이게 없으면 프레임률이 시뮬레이션을 바꾼다:
+      // 한 프레임이 33ms 를 넘으면 2스텝을 도는데, 서브스텝 1에서 레벨업이 떠도
+      // 서브스텝 2가 그대로 더 돌면서 rng 를 더 먹는다(사격 seed·크리 판정·스폰).
+      // 결과: 같은 데일리 시드인데 30fps 와 144fps 에게 다른 선택지가 뜬다.
+      // 144Hz 는 프레임당 1스텝이라 절대 초과하지 않고 30Hz 는 매 프레임 초과하므로,
+      // 시드별 최고 기록이 프레임률 경쟁이 된다. 죽음/승리도 5번 중복 실행됐다.
+      //
+      // acc 는 **버리지 않는다**. 여기서 0으로 밀면 2스텝 프레임만 남은 시간을 잃어
+      // 총 스텝 수가 또 프레임률에 종속된다. 남겨 두면 레벨업을 고른 뒤 다음
+      // 프레임이 그만큼 더 돌아 결국 같은 스텝 수로 수렴한다.
+      if (this.phase !== Phase.Playing) break
     }
     if (steps === MAX_STEPS) this.acc = 0 // 밀린 건 버린다
 
@@ -357,8 +379,9 @@ export class Game implements FireCtx {
         continue
       }
 
-      // 명중 판정 — 이 탄이 이번에 때린 적을 표시하는 스탬프
-      const stamp = ++this.hitStamp
+      // 명중 판정 — stamp 는 탄이 태어날 때 받은 고유값이다.
+      // 스텝마다 새로 발급하면 스텝 간 재타격을 못 막는다.
+      const stamp = shots.stamp[i]!
       const r = shots.radius[i]!
       const n = this.hash.query(x, y, r + 30, this.queryBuf)
       for (let k = 0; k < n; k++) {
@@ -398,10 +421,20 @@ export class Game implements FireCtx {
     if (foes.burn[j]! < 2.4) foes.burn[j] = 2.4
     if (foes.burnDps[j]! < dps) foes.burnDps[j] = dps
 
-    const n = this.foesInRadius(foes.x[j]!, foes.y[j]!, 62, this.spreadBuf)
+    // **foesInRadius 를 쓰면 안 된다.** 그건 this.queryBuf 를 스크래치로 쓰는데,
+    // 이 함수는 updateShots 가 바로 그 queryBuf 를 순회하는 도중에 불린다.
+    // 덮어쓰면 관통탄의 남은 명중 후보가 조용히 사라져서, 진화 불씨의 관통이
+    // 무작위로 절반쯤 먹통이 된다. 자기 버퍼로 직접 훑는다.
+    const fx = foes.x[j]!
+    const fy = foes.y[j]!
+    const R = 62
+    const n = this.hash.query(fx, fy, R, this.spreadBuf)
     for (let k = 0; k < n; k++) {
       const m = this.spreadBuf[k]!
-      if (m === j || foes.burn[m]! > 0) continue
+      if (m === j || foes.alive[m] === 0 || foes.burn[m]! > 0) continue
+      const dx = foes.x[m]! - fx
+      const dy = foes.y[m]! - fy
+      if (dx * dx + dy * dy > R * R) continue
       if (this.rng.next() < 0.32) {
         foes.burn[m] = 1.7
         foes.burnDps[m] = dps * 0.55
@@ -653,8 +686,10 @@ export class Game implements FireCtx {
       const cg = evo ? def.g * 0.9 : def.g
       const cb = evo ? def.b * 0.75 : def.b
       const rad = shots.radius[i]!
+      // 잔상은 공통, 본체는 무기가 정한 모양. WeaponDef.shape 를 아무도 안 읽어서
+      // 무기 6종의 탄이 전부 똑같은 구슬이었다.
       b.push(x, y, rad * 2.5, rot, cr * 0.8, cg * 0.8, cb * 0.8, 1, Shape.Spark)
-      b.push(x, y, rad, rot, cr + 0.6, cg + 0.6, cb + 0.6, 1, Shape.Orb)
+      b.push(x, y, rad * 1.25, rot, cr + 0.6, cg + 0.6, cb + 0.6, 1, def.shape)
     }
 
     // 파티클

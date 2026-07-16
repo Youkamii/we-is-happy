@@ -78,8 +78,6 @@ export class Foes extends PoolBase {
   /** 넉백·상태이상으로 밀리는 속도. 자체 이동과 분리해야 밀린 뒤 제자리를 찾는다. */
   readonly pushX: Float32Array
   readonly pushY: Float32Array
-  /** 슬로우 배율 (1 = 정상). 빙결 계열 시너지용. */
-  readonly slow: Float32Array
   /** 화상 남은 시간과 초당 피해 */
   readonly burn: Float32Array
   readonly burnDps: Float32Array
@@ -97,7 +95,6 @@ export class Foes extends PoolBase {
     this.flash = new Float32Array(capacity)
     this.pushX = new Float32Array(capacity)
     this.pushY = new Float32Array(capacity)
-    this.slow = new Float32Array(capacity)
     this.burn = new Float32Array(capacity)
     this.burnDps = new Float32Array(capacity)
     this.seed = new Float32Array(capacity)
@@ -116,7 +113,6 @@ export class Foes extends PoolBase {
     this.flash[i] = 0
     this.pushX[i] = 0
     this.pushY[i] = 0
-    this.slow[i] = 1
     this.burn[i] = 0
     this.burnDps[i] = 0
     this.seed[i] = seed
@@ -136,15 +132,14 @@ export class Shots extends PoolBase {
   readonly radius: Float32Array
   /** 이 탄을 쏜 무기 인덱스 — 색·모양·명중 효과가 여기서 갈린다. */
   readonly weapon: Uint8Array
-  /** 유도 강도 (0 = 직진) */
-  readonly homing: Float32Array
-  /** 조준 중인 적 인덱스 (-1 = 없음) */
-  readonly target: Int32Array
-  /** 궤도형 탄이 도는 각도 */
-  readonly orbit: Float32Array
   readonly seed: Float32Array
-  /** 이미 때린 적을 다시 안 때리게 하는 스탬프. 관통탄이 한 적을 갈아버리는 걸 막는다. */
-  readonly hitStamp: Int32Array
+  /**
+   * 탄마다 고유한 번호. 게임이 "이 탄이 이 적을 이미 때렸다"를 표시하는 데 쓴다.
+   * 반드시 **탄 단위**여야 한다 — 스텝 단위로 발급하면 관통탄이 같은 적을 매 스텝
+   * 다시 때려서 pierce 를 혼자 소진한다.
+   */
+  readonly stamp: Int32Array
+  private stampCounter = 1
 
   constructor(capacity: number) {
     super(capacity)
@@ -157,17 +152,14 @@ export class Shots extends PoolBase {
     this.pierce = new Float32Array(capacity)
     this.radius = new Float32Array(capacity)
     this.weapon = new Uint8Array(capacity)
-    this.homing = new Float32Array(capacity)
-    this.target = new Int32Array(capacity)
-    this.orbit = new Float32Array(capacity)
     this.seed = new Float32Array(capacity)
-    this.hitStamp = new Int32Array(capacity)
+    this.stamp = new Int32Array(capacity)
   }
 
   spawn(
     x: number, y: number, vx: number, vy: number,
     life: number, damage: number, pierce: number, radius: number,
-    weapon: number, homing: number, seed: number,
+    weapon: number, seed: number,
   ): number {
     const i = this.acquire()
     if (i < 0) return -1
@@ -180,11 +172,10 @@ export class Shots extends PoolBase {
     this.pierce[i] = pierce
     this.radius[i] = radius
     this.weapon[i] = weapon
-    this.homing[i] = homing
-    this.target[i] = -1
-    this.orbit[i] = 0
     this.seed[i] = seed
-    this.hitStamp[i] = 0
+    // 0 은 "아직 아무도 안 때렸다"는 뜻으로 foeStamp 초기값과 겹치므로 1부터 센다.
+    // 초당 4000×60 발을 쏴도 Int32 를 채우는 데 2.5시간이라 5분 런에선 오버플로 불가.
+    this.stamp[i] = this.stampCounter++
     return i
   }
 }

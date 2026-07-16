@@ -151,7 +151,7 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
 
     let desiredX = 0
     let desiredY = 0
-    const speed = stat.speed * foes.slow[i]!
+    const speed = stat.speed
 
     switch (stat.behavior) {
       case Behavior.Dash: {
@@ -264,9 +264,6 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
 
     // ── 상태 타이머
     if (foes.flash[i]! > 0) foes.flash[i]! -= dt
-    if (foes.slow[i]! < 1) {
-      foes.slow[i] = Math.min(1, foes.slow[i]! + dt * 0.55)
-    }
   }
 
   result.contactDamage = contactDamage
