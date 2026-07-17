@@ -22,9 +22,7 @@ export class Bot {
   /** 사람 흉내: 적 무리에서 멀어지고, 비어 있으면 XP 를 주우러 간다. */
   think(game: Game, dt: number): void {
     const p = game.player
-    // 블랙홀 안전 반경 — XP 포기(2)와 회피(4b)가 **같은 값**이어야 한다.
-    // 다르면 봇이 자기 회피 반경 안의 XP 를 쫓는 진동이 생긴다.
-    const holeAvoidR = game.holeR() * 2.2
+    const hr = game.holeR()
     this.wander += dt
 
     // 1) 주변 적에서 멀어지는 방향 — 가까울수록 세게.
@@ -51,10 +49,10 @@ export class Bot {
     let best = 260 * 260
     for (let i = 0; i < drops.high; i++) {
       if (drops.alive[i] === 0) continue
-      // 블랙홀 근처로 흘러간 XP 는 포기한다 — 사람은 검은 구멍에 손을 안 넣는다.
-      // 이 필터가 없으면 드리프트가 봇을 지평선 코앞(실측 276px)까지 유인해
-      // 지평선 테두리에 뭉친 스폰 무리와 정면 조우한다 (earlygame 광선 사망 원인).
-      if (Math.hypot(drops.x[i]!, drops.y[i]!) < holeAvoidR) continue
+      // 지평선 1.5배 안으로 흘러간 XP 만 포기한다 — 사람은 검은 구멍에 손을 안
+      // 넣지만, 원반 대역(1.2~3.2배)의 XP 는 이제 **주 수입원**이라 주워야 한다.
+      // (예전 2.2배 필터는 경제 반전 전 — 대역 전체를 포기하면 굶는다)
+      if (Math.hypot(drops.x[i]!, drops.y[i]!) < hr * 1.5) continue
       const dx = drops.x[i]! - p.x
       const dy = drops.y[i]! - p.y
       const d2 = dx * dx + dy * dy
@@ -152,12 +150,21 @@ export class Bot {
       my += (-p.y / r) * inward * 2.4
     }
 
-    // 4b) 블랙홀 — 안전 반경 안이면 바깥으로. 사람은 검은 구멍을 보고 피한다.
-    //     이 마진이 없으면 XP 를 쫓다 나선을 타고 빨려 들어간다 (중력은 상시다).
-    if (r < holeAvoidR) {
-      const out = (holeAvoidR - r) / game.holeR()
-      mx += (p.x / Math.max(1, r)) * out * 3.0
-      my += (p.y / Math.max(1, r)) * out * 3.0
+    // 4b) 고도 조절 — 가치는 원반에 있다. 평시엔 대역 중심(지평선 2.2배)으로
+    //     강하하고, 포식 예고가 뜨면 바깥으로 이탈한다. 사람이 고도계를 읽고
+    //     "박자 전에 나온다"를 하는 것과 같은 사이클이다.
+    {
+      const crisis = game.feeding() || game.feedWarn()
+      const targetR = crisis ? hr * 3.9 : hr * 2.2
+      let rPush = (targetR - r) / hr
+      if (rPush > 2) rPush = 2
+      if (rPush < -2) rPush = -2
+      // 위기의 이탈은 적 회피(1.0)보다 급하다 — 포식은 협상이 안 된다.
+      // 첫 30초는 강하하지 않는다: 무기 1개로 개막 강하했다가 대역에서 포위당해
+      // 13초에 죽었다(실측). 사람도 무기가 붙기 전엔 주변에서 배운다.
+      const w = crisis ? 2.6 : game.elapsed < 30 ? 0 : 0.7
+      mx += (p.x / Math.max(1, r)) * rPush * w
+      my += (p.y / Math.max(1, r)) * rPush * w
     }
 
     let len = Math.hypot(mx, my)

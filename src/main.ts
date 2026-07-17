@@ -6,8 +6,8 @@ import { createContext, GLError } from './engine/gl'
 import { Input } from './engine/input'
 import { Renderer } from './engine/renderer'
 import { dailySeed, hashSeed } from './engine/rng'
-import { ACTS } from './game/acts'
-import { Game, Phase, RUN_SECONDS } from './game/game'
+import { ACTS, DISK_IN, DISK_OUT } from './game/acts'
+import { Game, Phase, RUN_SECONDS, WORLD_R } from './game/game'
 import { LevelUpUI } from './ui/levelup'
 import { WEAPONS } from './game/weapons'
 import { loadRecords, makeResult, saveRecord, type RunResult } from './game/score'
@@ -178,6 +178,36 @@ function boot(): void {
   }
   syncMute()
   ui.appendChild(muteBtn)
+
+  // 고도계 — 좌측 세로 트랙. 아래 = 지평선(죽음), 금빛 밴드 = 강착원반(부의 구역),
+  // 점 = 나. 하단 숫자는 포식까지 남은 마디 — "박자 전에 나온다"를 읽는 계기판이다.
+  const ALT_H = 240
+  const altim = document.createElement('div')
+  altim.style.cssText =
+    'position:absolute;left:18px;top:50%;transform:translateY(-50%);width:10px;' +
+    `height:${ALT_H}px;pointer-events:none;background:rgba(8,12,22,.55);` +
+    'border:1px solid rgba(120,160,220,.22);border-radius:5px;'
+  const altBand = document.createElement('div')
+  altBand.style.cssText =
+    'position:absolute;left:0;right:0;border-radius:4px;' +
+    'background:linear-gradient(rgba(255,190,90,.12),rgba(255,150,50,.5),rgba(255,190,90,.12));'
+  altim.appendChild(altBand)
+  const altHole = document.createElement('div')
+  altHole.style.cssText =
+    'position:absolute;left:-3px;right:-3px;bottom:-7px;height:13px;background:#000;' +
+    'border:1px solid rgba(255,160,80,.7);border-radius:7px;'
+  altim.appendChild(altHole)
+  const altDot = document.createElement('div')
+  altDot.style.cssText =
+    'position:absolute;left:50%;width:15px;height:15px;transform:translate(-50%,-50%);' +
+    'background:radial-gradient(circle,#e8f6ff 0%,#5fb0ff 55%,transparent 72%);border-radius:50%;'
+  altim.appendChild(altDot)
+  const altFeed = document.createElement('div')
+  altFeed.style.cssText =
+    'position:absolute;left:50%;transform:translateX(-50%);bottom:-30px;' +
+    'font:800 13px ui-monospace,monospace;color:#ff9d6a;white-space:nowrap;letter-spacing:.08em;'
+  altim.appendChild(altFeed)
+  ui.appendChild(altim)
 
   let last = performance.now()
   let acc = 0
@@ -375,6 +405,24 @@ function boot(): void {
           // 아무도 모르는 성능 누수라, 계기판이 이 카운터의 유일한 독자다 (#9).
           (renderer.batch.overflows > 0 ? `  배치초과 ${renderer.batch.overflows}` : '')
         : '')
+
+    // 고도계 — sqrt 스케일 (선형이면 원반 대역이 하단에 뭉개진다)
+    {
+      const hr = game.holeR()
+      const scaleY = (v: number): number => {
+        const f = Math.sqrt(Math.min(1, Math.max(0, (v - hr) / (WORLD_R - hr))))
+        return ALT_H - f * ALT_H
+      }
+      altDot.style.top = `${scaleY(Math.hypot(p.x, p.y))}px`
+      const bTop = scaleY(hr * DISK_OUT)
+      const bBot = scaleY(hr * DISK_IN)
+      altBand.style.top = `${bTop}px`
+      altBand.style.height = `${Math.max(3, bBot - bTop)}px`
+      const bar = Math.floor(game.beatClock / 4)
+      altFeed.textContent = game.feeding() ? '포식!' : bar >= 16 ? `${7 - (bar % 8)}` : '—'
+      altFeed.style.color = game.feeding() || game.feedWarn() ? '#ff5a46' : '#ff9d6a'
+      altim.style.display = started && !result ? 'block' : 'none'
+    }
 
     // 막 전환 — 화면 가운데에 잠깐. 15분이 5분×3이 아니라 하나의 곡선이 되려면
     // "여기까지 왔다"는 이정표가 있어야 한다.

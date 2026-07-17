@@ -5,8 +5,8 @@
  * 밸런스가 달라지고, 협동에서 두 대의 결과가 갈린다.
  */
 import {
-  ACT_BEATS, ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BEATS, BOSS_AT, PACTS, RUN_SECONDS,
-  actIndexAt, actProgressAt, type ActDef,
+  ACT_BEATS, ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BEATS, BOSS_AT, DISK_IN, DISK_OUT,
+  FLOW_MAX, PACTS, RUN_SECONDS, actIndexAt, actProgressAt, diskBandAt, type ActDef,
 } from './acts'
 import type { SpriteBatch } from '../engine/batch'
 import type { SfxName } from '../engine/audio'
@@ -199,6 +199,12 @@ export class Game implements FireCtx {
    * 무기 1~2개 시절의 위기는 실력이 아니라 뽑기라, 튜토리얼 막에서만 바닥을 깐다.
    */
   private nextMercy = 0
+  /**
+   * 다음 파편 광맥 응결 시각. 포식이 흩뿌린 물질이 원반 대역에 XP 무리로 맺힌다 —
+   * "강하할 이유"의 실체. 시간 기반 주사위(성흔과 같은 규율 — 킬 경로에 rng 를
+   * 끼우면 스트림이 통째로 밀린다). 포식이 끝나면 곧바로 한 번 재보급된다.
+   */
+  private nextShardAt = 50
   /** 방금 발동한 비트 이름 — main 이 읽어 작은 배너로 띄운다 (연출 전용) */
   beatName = ''
   beatIntro = 0
@@ -291,8 +297,36 @@ export class Game implements FireCtx {
       this.sfx('boom')
       this.camera.shake(8, 6)
     }
+    if (!f && this.feedingNow) {
+      // 포식이 끝났다 — 삼킨 물질이 원반에 파편으로 맺힌다. 재보급이 강하 사이클의
+      // 박자다: 포식 전에 캐고, 나와서 버티고, 끝나면 다시 들어간다.
+      this.nextShardAt = Math.min(this.nextShardAt, this.elapsed + 1.5)
+    }
     this.feedingNow = f
     if (!f && !this.feedWarn()) this.feedWarned = false
+  }
+
+  /**
+   * 파편 광맥 — 원반 대역에 XP 무리가 응결된다 (판의 "저기 캐러 가자").
+   * 총량은 잔해와 같은 원칙: 그 시점 한 레벨의 22%를 10개로 나눠 담는다.
+   */
+  private tickShards(): void {
+    if (this.elapsed < this.nextShardAt) return
+    this.nextShardAt = this.elapsed + 21 + this.rng.next() * 9
+    const hr = this.holeR()
+    const a = this.rng.next() * Math.PI * 2
+    const r = hr * (DISK_IN + 0.3 + this.rng.next() * (DISK_OUT - DISK_IN - 0.6))
+    const cx = Math.cos(a) * r
+    const cy = Math.sin(a) * r
+    const value = (xpForLevel(this.player.level) * 0.22) / 10
+    for (let k = 0; k < 10; k++) {
+      const sa = this.rng.next() * Math.PI * 2
+      const sd = this.rng.next() * 64
+      this.drops.spawn(cx + Math.cos(sa) * sd, cy + Math.sin(sa) * sd, 0, 0, value, Drop.Xp)
+    }
+    // 응결의 섬광 — 멀리서도 "저기 맺혔다"가 보여야 강하가 결정이 된다
+    shockwave(this.motes, cx, cy, 200, 1.5, 1.2, 0.4, 0.9)
+    this.sfx('pickup')
   }
 
   start(seed: number): void {
@@ -316,6 +350,7 @@ export class Game implements FireCtx {
     this.nextVacuumRoll = 60
     this.nextBeatAt = 38
     this.nextMercy = 0
+    this.nextShardAt = 50
     this.beatName = ''
     this.beatIntro = 0
     this.pactXp = 1
@@ -340,8 +375,11 @@ export class Game implements FireCtx {
     this.echoSlot = null
     // 지형은 시드에서 나온다. 같은 시드 = 같은 맵.
     // 중심은 블랙홀 몫으로 비운다 — 5막 지평선(370) + 여유. 시작점은 궤도 위.
+    // 원반 대역(1막 안쪽 경계 ~ 5막 바깥 경계)은 조류의 강 — 벽 희박, 잔해 2배.
+    const holeMax = HOLE_BASE_R + HOLE_GROW * (ACTS.length - 1)
     this.terrain.generate(
-      seed, WORLD_R, 0, START_DIST, HOLE_BASE_R + HOLE_GROW * (ACTS.length - 1) + 210,
+      seed, WORLD_R, 0, START_DIST, holeMax + 210,
+      HOLE_BASE_R * DISK_IN, holeMax * DISK_OUT,
     )
     this.player.x = 0
     this.player.y = START_DIST
@@ -481,6 +519,18 @@ export class Game implements FireCtx {
       ) * dt
       p.x -= (p.x / pd) * g
       p.y -= (p.y / pd) * g
+      // ── 조류: 강착원반은 흐른다 — 나를 포함해서. 접선(반시계) 기류에 실려
+      // 궤도를 돈다. 타면 서핑이고 거스르면 기어간다 — 이동의 재발명이 여기다.
+      // 속도(vx)가 아니라 위치에 더한다: 조작 반응(즉시 감쇠 블렌드)을 안 건드린다.
+      const band = diskBandAt(pd, hr)
+      if (band > 0) {
+        const f = FLOW_MAX * band * dt
+        // 접선 벡터를 먼저 굳힌다 — x 를 갱신한 값으로 y 접선을 계산하면 나선이 샌다
+        const tx = -p.y / pd
+        const ty = p.x / pd
+        p.x += tx * f
+        p.y += ty * f
+      }
       if (pd < hr && p.hurt(16)) {
         this.camera.shake(10, 9)
         this.sfx('hurt')
@@ -563,6 +613,7 @@ export class Game implements FireCtx {
     this.spawn(dt)
     this.tickBeats(dt)
     this.tickVacuum()
+    this.tickShards()
 
     this.tickActs(dt)
 
@@ -618,18 +669,26 @@ export class Game implements FireCtx {
 
       // 화면 가장자리 바로 밖에서 나타나게. 더 멀면 걸어오는 데만 10초가 걸려
       // 초반이 텅 비고, 더 가까우면 눈앞에 튀어나와 불공정하다.
+      // 플레이어가 원반 대역 안이면 링을 좁힌다(520~800) — 조류가 추적을 나선으로
+      // 휘게 해 도달이 늦고(실측: 대역의 봇이 40초간 킬 7), fold 도 잦다.
+      // 강물에서 싸우기로 했으면 강물 위아래에서 빨리 밀려와야 그게 성립한다.
+      // 첫 45초는 제외 — 무기 1개 시절의 근접 스폰은 압박이 아니라 처형이다.
+      const pBand = diskBandAt(Math.hypot(this.player.x, this.player.y), this.holeR())
+      const tight = pBand > 0.25 && this.elapsed > 45
+      const rMin = tight ? 520 : 620
+      const rMax = tight ? 800 : 900
       if (type === Foe.Mote) {
         // 잔챙이는 무리로 — 이게 "군체"의 그림을 만든다
         const size = 5 + this.rng.int(6)
         this.spawnTimer -= size - 1 // 무리 하나가 예산 size 만큼을 쓴다
         spawnCluster(
           this.foes, type, this.player.x, this.player.y,
-          620, 880, hpScale, size, 66, rand, WORLD_R, this.holeGuard(),
+          rMin, rMax - 20, hpScale, size, 66, rand, WORLD_R, this.holeGuard(),
         )
       } else {
         const i = spawnRing(
           this.foes, type, this.player.x, this.player.y,
-          620, 900, hpScale, rand, WORLD_R, this.holeGuard(),
+          rMin, rMax, hpScale, rand, WORLD_R, this.holeGuard(),
         )
         // 엘리트 어픽스 — 2막부터 Hex·Eye 의 18%. 군중 속 "저놈부터"라는 단기 목표.
         if (
@@ -1473,11 +1532,17 @@ export class Game implements FireCtx {
       }
       this.drops.spawn(x, y, 0, 0, 60, Drop.Heal)
     } else {
+      // 경제 반전 — 가치는 원반에 있다. 외곽 킬은 헐값(0.55배), 원반 대역 킬은
+      // 최대 1.6배. 같은 적이라도 **어디서 잡느냐**가 소득이다: 안전한 외곽에서
+      // 버티는 플레이는 가난해지고, 조류 속에서 싸우는 플레이가 부자가 된다.
+      // 1막은 램프(외곽 0.85) — 시작점이 외곽이라 풀 반전이면 첫 수업(15초)이 굶는다.
+      const floor = this.act === 0 ? 0.85 : 0.55
+      const zoneMul = floor + diskBandAt(Math.hypot(x, y), this.holeR()) * (1.6 - floor)
       this.drops.spawn(
         x, y,
         (this.rng.next() - 0.5) * 60, (this.rng.next() - 0.5) * 60,
         // 어픽스는 단단한 만큼 값지다 — "저놈부터"의 보상
-        affix !== Affix.None ? stat.xp * 2.5 : stat.xp, Drop.Xp,
+        (affix !== Affix.None ? stat.xp * 2.5 : stat.xp) * zoneMul, Drop.Xp,
       )
     }
     // 회복은 드물어야 긴장이 산다 (탐식 계약은 이걸 반으로 줄인다).
@@ -1546,6 +1611,16 @@ export class Game implements FireCtx {
         // 접선 성분이 나선을 만든다 — 직선 낙하는 블랙홀처럼 안 보인다
         drops.vx[i]! += (-hx / hd) * g * 0.8 + (-hy / hd) * g * 0.55
         drops.vy[i]! += (-hy / hd) * g * 0.8 + (hx / hd) * g * 0.55
+        // 원반 대역 안에서는 조류가 지배한다 — XP 가 강물처럼 궤도를 돈다.
+        // drag(3.4)를 보상한 가속이라 종단 속도가 조류 유속과 같아진다.
+        // 막 램프(중력과 동일): 1막 0.3배 — 풀 유속이면 초반의 드문 드랍이 자석 밖으로
+        // 도주해 첫 수업이 굶는다(실측: 킬 7에 xp 1.6 정체, 첫 레벨업 42초).
+        const dband = diskBandAt(hd, hr)
+        if (dband > 0) {
+          const df = FLOW_MAX * dband * ramp * 3.4 * dt
+          drops.vx[i]! += (-hy / hd) * df
+          drops.vy[i]! += (hx / hd) * df
+        }
       }
 
       const dx = p.x - drops.x[i]!
@@ -1774,6 +1849,28 @@ export class Game implements FireCtx {
         const pulse = 0.75 + Math.sin(t * 2.4 + a * 9) * 0.3
         // 경계는 벽이지 조명이 아니다
         b.push(x, y, 34, a, 0.5 * pulse, 0.1 * pulse, 0.16 * pulse, 1, Shape.Orb)
+      }
+    }
+
+    // 조류 가시화 — 원반은 흐르는 강이다. 입자 띠가 궤도를 돈다 (렌더 전용·결정적:
+    // 반경은 황금비 산포 고정, 각속도는 시뮬과 같은 식 유속/반경 — 보이는 흐름이
+    // 곧 물리다). pushFx 경유라 광량 예산·보존 감광을 그대로 받는다.
+    {
+      const hr2 = this.holeR()
+      for (let k = 0; k < 128; k++) {
+        const fr = hr2 * (DISK_IN + (DISK_OUT - DISK_IN) * ((k * 0.61803) % 1))
+        const fb = diskBandAt(fr, hr2)
+        if (fb <= 0.05) continue
+        const ang = k * 2.399963 + t * ((FLOW_MAX * fb) / fr)
+        const fx0 = Math.cos(ang) * fr
+        const fy0 = Math.sin(ang) * fr
+        const fdx = fx0 - cx
+        const fdy = fy0 - cy
+        if (fdx * fdx + fdy * fdy > cullR2) continue
+        this.pushFx(
+          b, cullR, fx0, fy0, 26 + fb * 22, ang + Math.PI * 0.5,
+          0.5 * fb, 0.36 * fb, 0.18 * fb, 0.5, Shape.Spark, fxDim,
+        )
       }
     }
 

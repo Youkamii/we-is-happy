@@ -138,6 +138,27 @@ export const PACTS: readonly PactDef[] = [
   },
 ]
 
+// ── 강착원반 대역 — 세계 구조의 단일 진실 ────────────────────────────────
+// 모든 가치(킬 XP 배율·파편 광맥·조류)가 이 대역에 있다. 바깥은 불모지다.
+// "어디 있을 것인가"가 상시 결정이 되도록, 안전(외곽)과 부(원반)를 분리한다.
+
+/** 원반 안쪽 경계 (지평선 배수) — 이 밑은 곧 죽음이다 */
+export const DISK_IN = 1.2
+/** 원반 바깥 경계 (지평선 배수) — 이 위는 안전하지만 가난하다 */
+export const DISK_OUT = 3.2
+/** 조류 최대 유속 (px/s). 플레이어 이동(238)의 71% — 타면 서핑, 거스르면 기어간다 */
+export const FLOW_MAX = 170
+
+/**
+ * 원반 대역 소속도 0..1 — 대역 중심(지평선 2.2배)에서 1, 경계에서 0.
+ * hot path(적 2만)에서 부르므로 sin 대신 텐트 함수다.
+ */
+export function diskBandAt(r: number, holeR: number): number {
+  const t = (r - holeR * DISK_IN) / (holeR * (DISK_OUT - DISK_IN))
+  if (t <= 0 || t >= 1) return 0
+  return t < 0.5 ? t * 2 : 2 - t * 2
+}
+
 export const ACT_SECONDS = 180
 export const ACTS: readonly ActDef[] = [
   {

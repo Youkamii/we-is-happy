@@ -6,6 +6,7 @@
  */
 import type { SpatialHash } from '../engine/grid'
 import { Shape } from '../engine/shapes'
+import { FLOW_MAX, diskBandAt } from './acts'
 import { Foe, type FoeType, type Foes } from './pools'
 import type { Terrain } from './terrain'
 
@@ -338,8 +339,15 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
     } else if (holePull > 0) {
       const cd = Math.sqrt(rr)
       const g = (holePull * holeR) / cd * dt
-      nx -= (nx / cd) * g
-      ny -= (ny / cd) * g
+      // 조류 — 원반은 흐른다. 적도 휩쓸린다(0.4배: 스스로 걷는 것들은 덜 밀린다.
+      // 0.55는 추적 나선이 너무 길어져 대역의 플레이어에게 적이 40초간 못 닿았다).
+      // 접선을 좌표 갱신 **전에** 굳힌다 (nx 를 바꾼 값으로 ny 접선을 세면 나선이 샌다).
+      const band = diskBandAt(cd, holeR)
+      const f = FLOW_MAX * 0.4 * band * dt
+      const tx = -ny / cd
+      const ty = nx / cd
+      nx += tx * f - (nx / cd) * g
+      ny += ty * f - (ny / cd) * g
     }
 
     // 몸 반경. 보스는 렌더가 3.4배라 **모든 판정**(지형·접촉)이 같은 반경을 써야 한다 —

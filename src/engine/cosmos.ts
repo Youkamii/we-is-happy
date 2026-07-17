@@ -120,6 +120,13 @@ void main() {
   float holes = smoothstep(0.28, 0.62, n2);
   float neb = density * (0.35 + holes * 0.65);
   vec3 nebCol = mix(u_tintA, u_tintB, clamp(n2 * 1.3, 0.0, 1.0));
+  // 구역 팔레트 — 원반(지평선 3.2배) 밖은 불모의 진공. 성운의 채도를 죽여
+  // "가치의 지리"를 색으로 말한다: 색이 있는 곳에 부가 있다.
+  if (hr > 1.0) {
+    float barren = smoothstep(hr * 3.2, hr * 4.8, wr);
+    vec3 nebGray = vec3(dot(nebCol, vec3(0.299, 0.587, 0.114)));
+    nebCol = mix(nebCol, nebGray * 0.5, barren * 0.78);
+  }
   col += nebCol * neb * (0.16 + u_intensity * 0.34);
 
   // 성운 속 밝은 심(seam) — 필라멘트 가장자리가 빛난다
@@ -140,9 +147,10 @@ void main() {
   col += nebCol * 0.02 * pow(clamp(1.0 - r * 0.6, 0.0, 1.0), 3.0);
 
   if (hr > 1.0) {
-    // ── 강착원반: 지평선~3배 반경의 소용돌이. 안쪽일수록 빨리 돈다(케플러).
-    float diskT = (wr - hr) / (hr * 2.1);
-    if (diskT < 1.3 && wr > hr * 0.5) {
+    // ── 강착원반: **플레이 대역(1.2~3.2배)과 정렬** — 배경의 원반이 곧 게임의
+    // 원반이어야 "저 강물 안이 부자 동네"가 화면에서 읽힌다.
+    float diskT = (wr - hr * 1.2) / (hr * 2.0);
+    if (diskT < 1.15 && wr > hr * 0.5) {
       float ang = atan(world.y, world.x);
       float dT = max(diskT, 0.0);
       float swirl = ang + u_time * 0.4 / (0.22 + dT) + dT * 6.0;

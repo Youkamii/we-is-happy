@@ -114,8 +114,14 @@ export class Terrain {
    * startX/startY: 플레이어 시작점 — 세계 중심에 블랙홀이 생기면서 시작점이
    * 중심을 떠났다. holeClearR: 이 반경 안은 짓지 않는다(사건의 지평선 + 성장분).
    * 지평선 안 지형은 어차피 안 보이고, 걸치면 충돌만 남아 유령 벽이 된다.
+   * diskInR~diskOutR: 강착원반 대역 — 조류가 흐르는 곳이라 벽을 희박하게 짓는다
+   * (임계 상향, rng 소비 없음). 대신 잔해(cache)는 이 대역에 2배로 묻힌다 —
+   * 위험한 곳에 부가 있어야 강하할 이유가 된다.
    */
-  generate(seed: number, worldR: number, startX = 0, startY = 0, holeClearR = 0): void {
+  generate(
+    seed: number, worldR: number, startX = 0, startY = 0, holeClearR = 0,
+    diskInR = 0, diskOutR = 0,
+  ): void {
     const rng = new Rng(seed ^ 0x7e44a1)
     const { cols, rows } = this
     const solid = new Uint8Array(cols * rows)
@@ -156,7 +162,15 @@ export class Terrain {
         // 두 옥타브면 충분하다. 더 넣어 봐야 46px 셀에선 안 보인다.
         const v = sample(cx, cy) * 0.65 + sample(cx * 2.7 + 31, cy * 2.7 + 17) * 0.35
         // 임계값이 곧 맵 밀도다. 0.54 면 32% 라 화면이 벽으로 꽉 차 이동이 답답했다.
-        solid[cy * cols + cx] = v > 0.615 ? 1 : 0
+        // 원반 대역은 0.75 — 조류의 강에는 벽 대신 드문 바위만 선다.
+        let threshold = 0.615
+        if (diskOutR > 0) {
+          const wx = this.originX + cx * CELL + CELL * 0.5
+          const wy = this.originY + cy * CELL + CELL * 0.5
+          const d = Math.hypot(wx, wy)
+          if (d > diskInR && d < diskOutR) threshold = 0.75
+        }
+        solid[cy * cols + cx] = v > threshold ? 1 : 0
       }
     }
 
@@ -235,7 +249,16 @@ export class Terrain {
         this.tint[i] = rng.next()
         // 잔해는 **두꺼운 곳**에 묻힌다. 겉껍질에 있으면 파는 맛도 위험도 없다.
         // 시드가 정하므로 같은 시드면 같은 자리 — 데일리에서 "저기 있다"가 성립한다.
-        if (n >= 8 && rng.next() < 0.055) this.cache[i] = 1
+        // 원반 대역은 확률 2배 — 위험한 강에 부가 있어야 강하가 결정이 된다.
+        // (rng.next() 호출 수는 불변 — 확률값만 바꿔 스트림을 안 흔든다)
+        let cacheP = 0.055
+        if (diskOutR > 0) {
+          const wx = this.originX + cx * CELL + CELL * 0.5
+          const wy = this.originY + cy * CELL + CELL * 0.5
+          const d = Math.hypot(wx, wy)
+          if (d > diskInR && d < diskOutR) cacheP = 0.11
+        }
+        if (n >= 8 && rng.next() < cacheP) this.cache[i] = 1
       }
     }
   }
