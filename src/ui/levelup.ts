@@ -16,6 +16,7 @@ function css(r: number, g: number, b: number, scale = 1): string {
 export class LevelUpUI {
   private readonly root: HTMLDivElement
   private onPick: ((c: Choice) => void) | null = null
+  private onReroll: (() => void) | null = null
   private choices: Choice[] = []
   private visible = false
 
@@ -36,6 +37,13 @@ export class LevelUpUI {
     if (n >= 1 && n <= this.choices.length) {
       e.preventDefault()
       this.pick(this.choices[n - 1]!)
+      return
+    }
+    if ((e.key === 'r' || e.key === 'R') && this.onReroll) {
+      e.preventDefault()
+      const cb = this.onReroll
+      this.hide()
+      cb()
     }
   }
 
@@ -45,9 +53,13 @@ export class LevelUpUI {
     cb?.(c)
   }
 
-  show(choices: Choice[], level: number, onPick: (c: Choice) => void): void {
+  show(
+    choices: Choice[], level: number, onPick: (c: Choice) => void,
+    opts?: { header?: string; onReroll?: (() => void) | null },
+  ): void {
     this.choices = choices
     this.onPick = onPick
+    this.onReroll = opts?.onReroll ?? null
     this.visible = true
     this.root.style.display = 'grid'
     this.root.style.pointerEvents = 'auto'
@@ -56,24 +68,29 @@ export class LevelUpUI {
     const wrap = document.createElement('div')
     wrap.style.cssText = 'display:grid;gap:22px;justify-items:center;'
 
+    const isPact = opts?.header !== undefined
     const title = document.createElement('div')
-    title.textContent = `LEVEL ${level}`
+    title.textContent = opts?.header ?? `LEVEL ${level}`
     title.style.cssText =
-      'font:800 34px/1 ui-monospace,monospace;letter-spacing:.22em;color:#ffe3a8;' +
-      'text-shadow:0 0 28px rgba(255,170,60,.85);'
+      'font:800 34px/1 ui-monospace,monospace;letter-spacing:.22em;' +
+      (isPact
+        ? 'color:#ff9d8a;text-shadow:0 0 30px rgba(255,90,70,.8);'
+        : 'color:#ffe3a8;text-shadow:0 0 28px rgba(255,170,60,.85);')
     wrap.appendChild(title)
 
     // 레벨 자체가 준 성장. 3택은 안 고른 2개가 손실감이라, 선택과 무관하게
-    // 강해졌다는 걸 보여줘야 레벨업이 온전한 보상이 된다.
-    const g = levelGainOf(level)
-    const growth = document.createElement('div')
-    const parts = [`체력 +${g.maxHp}`, `피해 +${g.damage}%`]
-    if (g.milestone) parts.push(g.milestone)
-    growth.textContent = parts.join('   ')
-    growth.style.cssText =
-      `font:600 12px/1 ui-monospace,monospace;letter-spacing:.08em;margin-top:-8px;` +
-      `color:${g.milestone ? '#ffd166' : '#7fe3b8'};`
-    wrap.appendChild(growth)
+    // 강해졌다는 걸 보여줘야 레벨업이 온전한 보상이 된다. (계약 화면엔 무의미)
+    if (!isPact) {
+      const g = levelGainOf(level)
+      const growth = document.createElement('div')
+      const parts = [`체력 +${g.maxHp}`, `피해 +${g.damage}%`]
+      if (g.milestone) parts.push(g.milestone)
+      growth.textContent = parts.join('   ')
+      growth.style.cssText =
+        `font:600 12px/1 ui-monospace,monospace;letter-spacing:.08em;margin-top:-8px;` +
+        `color:${g.milestone ? '#ffd166' : '#7fe3b8'};`
+      wrap.appendChild(growth)
+    }
 
     const row = document.createElement('div')
     row.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;justify-content:center;'
@@ -114,7 +131,11 @@ export class LevelUpUI {
       titleEl.textContent = c.title
       titleEl.style.cssText = `font:700 19px/1.3 ui-monospace,monospace;color:${accent}`
       name.appendChild(titleEl)
-      const lvTag = c.kind === 'evolve' ? '진화' : c.level > 1 ? `Lv ${c.level}` : c.kind === 'heal' ? '' : 'NEW'
+      const lvTag =
+        c.kind === 'evolve' ? '진화'
+        : c.kind === 'pact' ? '계약'
+        : c.level > 1 ? `Lv ${c.level}`
+        : c.kind === 'heal' ? '' : 'NEW'
       if (lvTag) {
         const tagEl = document.createElement('span')
         tagEl.textContent = ` ${lvTag}`
@@ -145,6 +166,21 @@ export class LevelUpUI {
 
     wrap.appendChild(row)
 
+    if (this.onReroll) {
+      const rr = document.createElement('button')
+      rr.textContent = '다시 뽑기 — 막마다 1회 (R)'
+      rr.style.cssText =
+        'padding:9px 20px;cursor:pointer;pointer-events:auto;' +
+        'background:rgba(120,160,220,.08);border:1px solid rgba(120,160,220,.35);' +
+        'border-radius:8px;color:#9fb6d4;font:600 12px ui-monospace,monospace;letter-spacing:.08em;'
+      rr.onclick = () => {
+        const cb = this.onReroll!
+        this.hide()
+        cb()
+      }
+      wrap.appendChild(rr)
+    }
+
     const help = document.createElement('div')
     help.textContent = '숫자키 또는 클릭'
     help.style.cssText = 'font:400 11px/1 ui-monospace,monospace;color:#5f7893;letter-spacing:.1em;'
@@ -158,6 +194,7 @@ export class LevelUpUI {
     this.root.style.display = 'none'
     this.root.style.pointerEvents = 'none'
     this.onPick = null
+    this.onReroll = null
   }
 
   get isVisible(): boolean {

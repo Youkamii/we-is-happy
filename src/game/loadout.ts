@@ -6,6 +6,7 @@
  * 선택지에 힌트가 뜨고, 조건을 채우면 진화가 선택지로 올라온다.
  */
 import type { Rng } from '../engine/rng'
+import { PACTS } from './acts'
 import { applyLevelGrowth, baseStats, type Player } from './player'
 import {
   EVO_PASSIVE_LEVEL, EVO_WEAPON_LEVEL, PASSIVES, WEAPONS, WeaponSlot,
@@ -14,7 +15,7 @@ import {
 export const MAX_WEAPONS = 6
 export const MAX_PASSIVES = 6
 
-export type ChoiceKind = 'weapon' | 'passive' | 'evolve' | 'heal'
+export type ChoiceKind = 'weapon' | 'passive' | 'evolve' | 'heal' | 'pact'
 
 export interface Choice {
   kind: ChoiceKind
@@ -35,10 +36,16 @@ export class Loadout {
   readonly weapons: WeaponSlot[] = []
   /** 인덱스 = 패시브 id, 값 = 레벨 (0 = 미보유) */
   readonly passives: number[] = new Array(PASSIVES.length).fill(0)
+  /** 막의 계약이 얹은 플레이어 배율 — recomputeStats 가 매번 다시 곱한다 */
+  readonly pactMods = { damage: 1, maxHp: 1, speed: 1, cooldown: 1 }
 
   reset(startingWeapon: number): void {
     this.weapons.length = 0
     this.passives.fill(0)
+    this.pactMods.damage = 1
+    this.pactMods.maxHp = 1
+    this.pactMods.speed = 1
+    this.pactMods.cooldown = 1
     this.weapons.push(new WeaponSlot(startingWeapon))
   }
 
@@ -60,6 +67,11 @@ export class Loadout {
       const lv = this.passives[i]!
       if (lv > 0) PASSIVES[i]!.apply(player, lv)
     }
+    // 막의 계약 — 레벨·패시브 위에 곱으로. 재계산마다 다시 얹어야 살아남는다.
+    player.stats.damage *= this.pactMods.damage
+    player.stats.maxHp = Math.round(player.stats.maxHp * this.pactMods.maxHp)
+    player.stats.speed *= this.pactMods.speed
+    player.stats.cooldown *= this.pactMods.cooldown
     // 최대 체력이 오르면 비율을 유지한다 (수호를 찍었는데 체력이 안 늘면 함정이다)
     player.hp = Math.min(player.stats.maxHp, player.stats.maxHp * hpRatio)
   }
@@ -233,6 +245,16 @@ export class Loadout {
       }
       case 'heal': {
         player.heal(30)
+        break
+      }
+      case 'pact': {
+        // 플레이어 쪽 배율만 여기서 — 세계 쪽(xp·스폰·적)은 game.choose 가 얹는다
+        const d = PACTS[choice.index]!
+        this.pactMods.damage *= d.dmg
+        this.pactMods.maxHp *= d.maxHp
+        this.pactMods.speed *= d.speed
+        this.pactMods.cooldown *= d.cooldown
+        this.recomputeStats(player)
         break
       }
       default:

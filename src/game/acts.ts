@@ -83,6 +83,56 @@ export const ACT_BEATS: readonly (readonly number[])[] = [
   [2, 3, 4, 0], // 5막의 조류는 물량 그 자체가 구경거리다
 ]
 
+/**
+ * 막의 계약 — 막이 바뀔 때마다 셋 중 하나를 **반드시** 고른다 (거절 없음).
+ *
+ * 균일한 15분은 6분쯤이면 결과가 정해진 관람이 된다. 계약은 같은 시드에서도
+ * 플레이어가 런의 규칙을 저자로서 바꾸게 한다 — 전부 득실이 함께 있어야
+ * "정답 찾기"가 아니라 "내 빌드에 맞는 위험 고르기"가 된다.
+ * 전부 배율(1 = 무변화). dmg·maxHp·speed·cooldown 은 플레이어(loadout)가,
+ * xp·foeHp·spawn·foeSpeed·heal 은 세계(game)가 적용한다.
+ */
+export interface PactDef {
+  readonly name: string
+  readonly desc: string
+  readonly dmg: number
+  readonly maxHp: number
+  readonly speed: number
+  readonly cooldown: number
+  readonly xp: number
+  readonly foeHp: number
+  readonly spawn: number
+  readonly foeSpeed: number
+  readonly heal: number
+}
+
+export const PACTS: readonly PactDef[] = [
+  {
+    name: '혈월', desc: '적이 40% 더 몰려온다. 경험치 +35%',
+    dmg: 1, maxHp: 1, speed: 1, cooldown: 1, xp: 1.35, foeHp: 1, spawn: 1.4, foeSpeed: 1, heal: 1,
+  },
+  {
+    name: '유리심장', desc: '피해 +40%. 최대 체력 -25%',
+    dmg: 1.4, maxHp: 0.75, speed: 1, cooldown: 1, xp: 1, foeHp: 1, spawn: 1, foeSpeed: 1, heal: 1,
+  },
+  {
+    name: '잿바람', desc: '이동 +12%, 공격 속도 +12%. 적도 12% 빨라진다',
+    dmg: 1, maxHp: 1, speed: 1.12, cooldown: 0.88, xp: 1, foeHp: 1, spawn: 1, foeSpeed: 1.12, heal: 1,
+  },
+  {
+    name: '탐식', desc: '경험치 +25%. 회복이 절반만 떨어진다',
+    dmg: 1, maxHp: 1, speed: 1, cooldown: 1, xp: 1.25, foeHp: 1, spawn: 1, foeSpeed: 1, heal: 0.5,
+  },
+  {
+    name: '고행', desc: '적 체력 +30%. 경험치 +45%',
+    dmg: 1, maxHp: 1, speed: 1, cooldown: 1, xp: 1.45, foeHp: 1.3, spawn: 1, foeSpeed: 1, heal: 1,
+  },
+  {
+    name: '질풍', desc: '공격 속도 +20%. 적 체력 +15%',
+    dmg: 1, maxHp: 1, speed: 1, cooldown: 0.8, xp: 1, foeHp: 1.15, spawn: 1, foeSpeed: 1, heal: 1,
+  },
+]
+
 export const ACT_SECONDS = 180
 export const ACTS: readonly ActDef[] = [
   {

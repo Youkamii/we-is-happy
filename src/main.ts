@@ -296,7 +296,11 @@ function boot(): void {
         const evo = cs.find((c) => c.kind === 'evolve')
         game.choose(evo ?? cs[game.rng.int(cs.length)]!)
       } else if (!levelUp.isVisible) {
-        levelUp.show(game.pendingChoices, game.player.level, (c) => game.choose(c))
+        const isPact = game.pendingChoices[0]!.kind === 'pact'
+        levelUp.show(game.pendingChoices, game.player.level, (c) => game.choose(c), {
+          ...(isPact ? { header: `${game.act + 1}막의 계약` } : {}),
+          onReroll: !isPact && game.rerollLeft > 0 ? () => game.reroll() : null,
+        })
       }
     }
 

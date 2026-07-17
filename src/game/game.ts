@@ -5,7 +5,7 @@
  * 밸런스가 달라지고, 협동에서 두 대의 결과가 갈린다.
  */
 import {
-  ACT_BEATS, ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BEATS, BOSS_AT, RUN_SECONDS,
+  ACT_BEATS, ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BEATS, BOSS_AT, PACTS, RUN_SECONDS,
   actIndexAt, actProgressAt, type ActDef,
 } from './acts'
 import type { SpriteBatch } from '../engine/batch'
@@ -22,7 +22,8 @@ import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { drawHealthRing, drawOffscreenMarker, drawXpArc } from './hud3d'
 import {
-  BOSS_SCALE, FOE_STATS, foeRotation, spawnCluster, spawnFormation, spawnRing, updateFoes,
+  AFFIX_COLORS, Affix, BOSS_SCALE, FOE_STATS, foeRotation, spawnCluster, spawnFormation,
+  spawnRing, updateFoes,
 } from './foes'
 import { Boss, BossState } from './boss'
 import { Loadout, type Choice } from './loadout'
@@ -164,6 +165,14 @@ export class Game implements FireCtx {
   /** 방금 발동한 비트 이름 — main 이 읽어 작은 배너로 띄운다 (연출 전용) */
   beatName = ''
   beatIntro = 0
+  /** 막의 계약 — 세계 쪽 배율 (플레이어 쪽은 loadout.pactMods). acts.ts PACTS 참고. */
+  private pactXp = 1
+  private pactFoeHp = 1
+  private pactSpawn = 1
+  private pactFoeSpeed = 1
+  private pactHeal = 1
+  /** 레벨업 다시 뽑기 — 막마다 1회. 죽은 드래프트 구제용. */
+  rerollLeft = 1
   /**
    * 이번 프레임에 낼 소리. Game 이 Audio 를 직접 들면 시뮬레이션이 브라우저에
    * 묶여서 테스트가 안 돈다 — 큐에 쌓고 main 이 소비한다.
@@ -203,6 +212,12 @@ export class Game implements FireCtx {
     this.nextBeatAt = 35
     this.beatName = ''
     this.beatIntro = 0
+    this.pactXp = 1
+    this.pactFoeHp = 1
+    this.pactSpawn = 1
+    this.pactFoeSpeed = 1
+    this.pactHeal = 1
+    this.rerollLeft = 1
     this.act = 0
     this.actIntro = ACT_INTRO_SECONDS
     this.bossSpawned = false
@@ -226,6 +241,18 @@ export class Game implements FireCtx {
   choose(choice: Choice): void {
     this.loadout.apply(choice, this.player)
     this.echoSlot = this.loadout.findWeapon(W.Echo) ?? null
+    if (choice.kind === 'pact') {
+      // 세계 쪽 배율 — 플레이어 쪽은 loadout.apply 가 이미 얹었다
+      const d = PACTS[choice.index]!
+      this.pactXp *= d.xp
+      this.pactFoeHp *= d.foeHp
+      this.pactSpawn *= d.spawn
+      this.pactFoeSpeed *= d.foeSpeed
+      this.pactHeal *= d.heal
+      this.sfx('evolve')
+      shockwave(this.motes, this.player.x, this.player.y, 340, EVENT * 0.9, 0.32, 0.4, 1.0)
+      this.camera.shake(10, 8)
+    }
     if (choice.kind === 'evolve') {
       // 진화는 이 게임에서 가장 귀한 순간이라 유일하게 EVENT 밝기를 쓴다. 1초 미만.
       this.sfx('evolve')
@@ -318,6 +345,7 @@ export class Game implements FireCtx {
         deadOut: this.deadBuf,
         terrain: this.terrain,
         bossIdx: this.boss.idx,
+        speedMul: this.pactFoeSpeed,
       },
       this.player.radius,
     )
@@ -396,11 +424,11 @@ export class Game implements FireCtx {
     // 밀도가 아니라 접촉 피해가 진짜가 된 것 때문인데, 밀도만 두 번 깎은 셈이다.
     // 실측(t=10s 화면 적 30~46마리)에서 "군체가 밀려온다"는 그림 자체가 사라졌다.
     const warmup = Math.min(1, 0.5 + (this.elapsed / 15) * 0.5)
-    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4) * warmup
+    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4) * warmup * this.pactSpawn
     this.spawnTimer += dt * rate
 
-    // 체력: 막 배율에 막 안 진행분을 얹는다
-    const hpScale = act.hp * (1 + inAct * 0.55)
+    // 체력: 막 배율에 막 안 진행분을 얹는다 (+ 계약)
+    const hpScale = act.hp * (1 + inAct * 0.55) * this.pactFoeHp
     const rand = this.randFn
 
     while (this.spawnTimer >= 1) {
@@ -425,10 +453,17 @@ export class Game implements FireCtx {
           620, 880, hpScale, size, 66, rand, WORLD_R,
         )
       } else {
-        spawnRing(
+        const i = spawnRing(
           this.foes, type, this.player.x, this.player.y,
           620, 900, hpScale, rand, WORLD_R,
         )
+        // 엘리트 어픽스 — 2막부터 Hex·Eye 의 18%. 군중 속 "저놈부터"라는 단기 목표.
+        if (
+          i >= 0 && this.act >= 1 && (type === Foe.Hex || type === Foe.Eye) &&
+          this.rng.next() < 0.18
+        ) {
+          this.foes.affix[i] = 1 + this.rng.int(4)
+        }
       }
     }
   }
@@ -454,6 +489,12 @@ export class Game implements FireCtx {
       shockwave(this.motes, this.player.x, this.player.y, 420, EVENT * 0.7, EVENT * 0.6, 0.8, 1.4)
       this.camera.shake(10, 5)
       this.sfx('levelup')
+      // 막의 계약 — 새 막은 조건을 걸고 시작한다. 거절은 없다: 계약이 곧 막이다.
+      // 셋 다 득실이 함께라 "내 빌드에 맞는 위험 고르기"가 된다 (acts.ts PACTS).
+      this.pendingChoices = this.rollPacts()
+      this.pendingLevels += 1
+      this.phase = Phase.LevelUp
+      this.rerollLeft = 1 // 리롤도 막마다 충전
     }
 
     // 막 끝 보스. 남은 20초는 잡고 정리할 여유다.
@@ -642,6 +683,29 @@ export class Game implements FireCtx {
     burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 34, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
     this.camera.shake(18, 6)
     this.sfx('evolve')
+  }
+
+  /** 계약 3택 — 서로 다른 계약 셋. 막 전환에서만 쓰이므로 할당이 있어도 싸다. */
+  private rollPacts(): Choice[] {
+    const picked: number[] = []
+    while (picked.length < 3) {
+      const id = this.rng.int(PACTS.length)
+      if (!picked.includes(id)) picked.push(id)
+    }
+    return picked.map((id) => {
+      const d = PACTS[id]!
+      return {
+        kind: 'pact' as const, index: id, title: d.name, desc: d.desc, level: 0,
+        r: 1.7, g: 0.42, b: 0.5, hint: '계약 — 되돌릴 수 없다',
+      }
+    })
+  }
+
+  /** 레벨업 다시 뽑기 — 막마다 1회. UI 가 부른다 (계약엔 안 쓴다). */
+  reroll(): void {
+    if (this.rerollLeft <= 0 || this.phase !== Phase.LevelUp) return
+    this.rerollLeft--
+    this.pendingChoices = this.loadout.roll(this.rng, 3, this.player.stats.awaken)
   }
 
   /**
@@ -851,7 +915,7 @@ export class Game implements FireCtx {
     }
     if (placed < 7) {
       const lost = (7 - placed) * value
-      this.pendingLevels += this.player.gainXp(lost)
+      this.pendingLevels += this.player.gainXp(lost * this.pactXp)
       if (this.pendingLevels > 0 && this.phase === Phase.Playing) {
         this.phase = Phase.LevelUp
         this.loadout.recomputeStats(this.player)
@@ -1162,6 +1226,8 @@ export class Game implements FireCtx {
     let dmg = damage * foes.frail[j]!
     // 보스 빈틈은 딜 기회다 — 피한 보상이 없으면 패턴을 읽을 이유가 없다
     if (j === this.boss.idx) dmg *= this.boss.damageScale()
+    // 수정 어픽스 — 단단한 대신 보상이 크다 (killFoe 참고)
+    if (foes.affix[j] === Affix.Prism) dmg *= 0.6
     if (this.rng.next() < s.critChance) dmg *= s.critMult
 
     foes.hp[j]! -= dmg
@@ -1169,12 +1235,14 @@ export class Game implements FireCtx {
     this.player.damageDealt += dmg
     this.sfx('hit')
 
-    // 넉백 — 무게가 무거울수록 덜 밀린다
-    const stat = FOE_STATS[foes.type[j]!]!
-    const kb = 240 * s.knockback * stat.weight
-    const len = Math.hypot(fromVx, fromVy) || 1
-    foes.pushX[j]! += (fromVx / len) * kb
-    foes.pushY[j]! += (fromVy / len) * kb
+    // 넉백 — 무게가 무거울수록 덜 밀린다. 장벽 어픽스는 아예 안 밀린다.
+    if (foes.affix[j] !== Affix.Bulwark) {
+      const stat = FOE_STATS[foes.type[j]!]!
+      const kb = 240 * s.knockback * stat.weight
+      const len = Math.hypot(fromVx, fromVy) || 1
+      foes.pushX[j]! += (fromVx / len) * kb
+      foes.pushY[j]! += (fromVy / len) * kb
+    }
 
     if (foes.hp[j]! <= 0) this.killFoe(j)
   }
@@ -1185,6 +1253,7 @@ export class Game implements FireCtx {
     const x = foes.x[j]!
     const y = foes.y[j]!
     const isBossKill = j === this.boss.idx && foes.stamp[j] === this.boss.stamp
+    const affix = foes.affix[j]!
 
     // 화면에 2만 마리가 죽는 후반에 파티클을 그대로 뿌리면 풀이 순식간에 마른다.
     // 큰 적일수록 많이, 잔챙이는 적게.
@@ -1210,7 +1279,7 @@ export class Game implements FireCtx {
         const a = this.rng.next() * Math.PI * 2
         const sp = 90 + this.rng.next() * 180
         if (this.drops.spawn(x, y, Math.cos(a) * sp, Math.sin(a) * sp, chunk, Drop.Xp) < 0) {
-          this.pendingLevels += this.player.gainXp(chunk)
+          this.pendingLevels += this.player.gainXp(chunk * this.pactXp)
         }
       }
       this.drops.spawn(x, y, 0, 0, 60, Drop.Heal)
@@ -1218,14 +1287,26 @@ export class Game implements FireCtx {
       this.drops.spawn(
         x, y,
         (this.rng.next() - 0.5) * 60, (this.rng.next() - 0.5) * 60,
-        stat.xp, Drop.Xp,
+        // 어픽스는 단단한 만큼 값지다 — "저놈부터"의 보상
+        affix !== Affix.None ? stat.xp * 2.5 : stat.xp, Drop.Xp,
       )
     }
-    // 회복은 드물어야 긴장이 산다
-    if (this.rng.next() < 0.006) this.drops.spawn(x, y, 0, 0, 22, Drop.Heal)
+    // 회복은 드물어야 긴장이 산다 (탐식 계약은 이걸 반으로 줄인다)
+    if (this.rng.next() < 0.006 * this.pactHeal) this.drops.spawn(x, y, 0, 0, 22, Drop.Heal)
 
     foes.kill(j)
     this.player.kills++
+
+    // 어픽스 정산 — 분열은 죽음이 곧 새 위협이고, 처치엔 확정 회복이 남는다
+    if (affix === Affix.Brood) {
+      const mhp = FOE_STATS[Foe.Mote]!.hp * ACTS[this.act]!.hp
+      for (let k = 0; k < 6; k++) {
+        const a = this.rng.next() * Math.PI * 2
+        this.foes.spawn(x + Math.cos(a) * 28, y + Math.sin(a) * 28, Foe.Mote, mhp, this.rng.next())
+      }
+    }
+    if (affix !== Affix.None) this.drops.spawn(x, y, 0, 0, 24, Drop.Heal)
+
     // 반향 — 내가 부순 자리에서 소리가 되돌아온다.
     // 슬롯은 캐시한다. 매 킬(후반 초당 수백)마다 find() 로 클로저를 만들고 6칸을
     // 스캔하면 hot path 에서 그냥 낭비다.
@@ -1291,7 +1372,7 @@ export class Game implements FireCtx {
       if (d2 < pickup2) {
         const type = drops.type[i]!
         if (type === Drop.Xp) {
-          leveled += p.gainXp(drops.value[i]!)
+          leveled += p.gainXp(drops.value[i]! * this.pactXp)
           this.sfx('pickup')
         } else if (type === Drop.Heal) {
           p.heal(drops.value[i]!)
@@ -1466,16 +1547,32 @@ export class Game implements FireCtx {
       // 불타는 적은 주황으로 물든다. 장작불 빌드가 화면에 보여야 재미가 있다.
       const fire = foes.burn[i]! > 0 ? 1 : 0
       const size = isBoss ? stat.radius * BOSS_SCALE : stat.radius
+      const affix = foes.affix[i]!
+      // 유사 3D: 큰 것에만 접지 그림자 — 잔챙이 2만에 다 깔면 바닥이 그림자로 찬다.
+      if (isBoss || stat.radius >= 16 || affix > 0) {
+        renderer.shadows.push(x, y - size * 0.45, size * 1.02, 0, 0, 0, 0.045, 0.42, Shape.Orb)
+      }
+      // 대시 중인 Husk 는 살짝 떠오른다 — 도약이 평면 미끄러짐으로 안 보이게 (렌더 전용)
+      let drawY = y
+      if (foes.type[i] === Foe.Husk) {
+        const dashSp = Math.hypot(foes.vx[i]!, foes.vy[i]!)
+        if (dashSp > 260) drawY = y + Math.min(9, (dashSp - 260) * 0.045)
+      }
       // 보스는 하나뿐이라 밝아도 안전하다. 잡졸은 기준선을 지킨다.
       const lum = (isBoss ? ACCENT : FOE_BASE) * hit * dim
       b.push(
-        x, y, size, foeRotation(foes, i, t),
+        x, drawY, size, foeRotation(foes, i, t),
         (stat.r + fire * 0.85) * lum,
         (stat.g + fire * 0.3) * lum,
         stat.b * (1 - fire * 0.55) * lum,
         1,
         stat.shape,
       )
+      // 어픽스 링 — 종류가 색으로 즉시 읽혀야 "저놈부터"가 된다
+      if (affix > 0) {
+        const ac = AFFIX_COLORS[affix]!
+        b.push(x, drawY, size * 1.5, t * 1.7, ac[0]! * dim, ac[1]! * dim, ac[2]! * dim, 1, Shape.Ring)
+      }
       // 보스는 화면에서 즉시 구분돼야 한다 — 왕관과 도는 광륜
       if (isBoss) {
         b.push(x, y, size * 1.5, t * 0.7, 1.6, 0.9, 0.28, 1, Shape.Halo)
@@ -1593,14 +1690,18 @@ export class Game implements FireCtx {
       // 적 2,000마리 사이에서 묻히면 그 순간 게임을 할 수 없다.
       // 광륜(느린 회전) + 씨앗 코어(빠른 역회전) + 십자 섬광. 셋 다 다른 속도로 돌아서
       // 정적인 적 무리 속에서 유일하게 "살아 있는" 것으로 읽힌다.
-      b.push(p.x, p.y, 42, t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
-      b.push(p.x, p.y, 26, -t * 1.4, PLAYER_BASE * inv, PLAYER_BASE * 0.85 * inv, PLAYER_BASE * 1.2 * inv, 1, Shape.Seed)
-      b.push(p.x, p.y, 15, t * 3.1, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, 1, Shape.Nova)
+      // 유사 3D: 이동 중 살짝 떠오르고(hop), 그림자는 지면에 남는다 — 접지감의 핵심
+      const hop = Math.abs(p.vx) + Math.abs(p.vy) > 20 ? Math.abs(Math.sin(t * 11)) * 5 : 0
+      renderer.shadows.push(p.x, p.y - 13, 30, 0, 0, 0, 0.05, 0.5, Shape.Orb)
+      const py = p.y + hop
+      b.push(p.x, py, 42, t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
+      b.push(p.x, py, 26, -t * 1.4, PLAYER_BASE * inv, PLAYER_BASE * 0.85 * inv, PLAYER_BASE * 1.2 * inv, 1, Shape.Seed)
+      b.push(p.x, py, 15, t * 3.1, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, 1, Shape.Nova)
 
       // 목숨과 관련된 건 전부 몸에 붙인다 — 시선이 이미 거기 있으니까.
       // 좌상단 8px "HP 49%" 는 후반에 아무도 안 읽는다.
-      drawHealthRing(b, p.x, p.y, p.hp / p.stats.maxHp, t)
-      drawXpArc(b, p.x, p.y, p.xp / p.xpNeeded)
+      drawHealthRing(b, p.x, py, p.hp / p.stats.maxHp, t)
+      drawXpArc(b, p.x, py, p.xp / p.xpNeeded)
 
       // 화면 밖 보스 — 어디서 오는지 모르면 "갑자기 죽었다"가 된다
       if (this.boss.idx >= 0 && foes.alive[this.boss.idx] === 1) {

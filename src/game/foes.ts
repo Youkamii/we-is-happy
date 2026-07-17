@@ -79,6 +79,31 @@ export const FOE_STATS: readonly FoeStat[] = [
 const MAX_NEIGHBORS = 24
 const neighborBuf = new Int32Array(MAX_NEIGHBORS)
 
+/**
+ * 엘리트 어픽스 — 군중 속에 "저놈부터"라는 단기 목표를 만든다.
+ * 전부 국소 규칙이라 hot path 에 u8 비교 하나씩만 얹힌다. 색 링으로 표시된다.
+ */
+export const Affix = {
+  None: 0,
+  /** 분열 — 죽을 때 Mote 를 낳는다 (초록) */
+  Brood: 1,
+  /** 광란 — 체력 절반 아래에서 1.75배로 빨라진다 (붉음) */
+  Frenzy: 2,
+  /** 수정 — 받는 피해 -40%, 대신 보상이 크다 (청록) */
+  Prism: 3,
+  /** 장벽 — 넉백에 밀리지 않는다 (금색) */
+  Bulwark: 4,
+} as const
+
+/** 어픽스 표시 링 색 (인덱스 = Affix 값). 종류가 색으로 즉시 읽혀야 목표가 된다. */
+export const AFFIX_COLORS: readonly (readonly [number, number, number])[] = [
+  [0, 0, 0],
+  [0.35, 1.35, 0.4], // 분열 — 초록
+  [1.5, 0.32, 0.28], // 광란 — 붉음
+  [0.3, 1.25, 1.4], // 수정 — 청록
+  [1.45, 1.1, 0.3], // 장벽 — 금색
+]
+
 export interface FoeUpdateCtx {
   readonly foes: Foes
   readonly hash: SpatialHash
@@ -98,6 +123,8 @@ export interface FoeUpdateCtx {
   readonly terrain: Terrain | null
   /** 보스 슬롯 (-1 = 없음). 판정 반경이 렌더와 같아야 하므로 여기서도 알아야 한다. */
   readonly bossIdx: number
+  /** 전 적 이동 배율 — 계약(Ash Wind 류)이 올린다. 1 = 평소. */
+  readonly speedMul: number
 }
 
 export interface FoeUpdateResult {
@@ -126,7 +153,7 @@ const scratch = new Float32Array(2)
 
 /** 군체 한 틱. */
 export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateResult {
-  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain, bossIdx } = ctx
+  const { foes, hash, playerX, playerY, dt, time, worldR, deadOut, terrain, bossIdx, speedMul } = ctx
   let deadCount = 0
   const high = foes.high
   const alive = foes.alive
@@ -237,6 +264,16 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
     const blend = 1 - Math.exp(-9 * dt)
     let vx = vxs[i]! + (desiredX - vxs[i]!) * blend
     let vy = vys[i]! + (desiredY - vys[i]!) * blend
+
+    // ── 어픽스·계약의 이동 배율 (추격 속도에만 — 넉백은 그대로 받는다)
+    if (foes.affix[i] === Affix.Frenzy && foes.hp[i]! < foes.maxHp[i]! * 0.5) {
+      vx *= 1.75
+      vy *= 1.75
+    }
+    if (speedMul !== 1) {
+      vx *= speedMul
+      vy *= speedMul
+    }
 
     // ── 넉백: 자체 이동과 별도로 더해지고 빠르게 감쇠한다
     const px = foes.pushX[i]!

@@ -96,6 +96,8 @@ export class Foes extends PoolBase {
    * 가리킬 수 있다. 실제로 잡졸이 보스 정체성을 상속하는 버그가 있었다.
    */
   readonly stamp: Int32Array
+  /** 엘리트 어픽스 (0 = 없음, foes.ts Affix 참고). Hex·Eye 일부에만 붙는다. */
+  readonly affix: Uint8Array
   private stampCounter = 1
 
   constructor(capacity: number) {
@@ -116,6 +118,7 @@ export class Foes extends PoolBase {
     this.frail = new Float32Array(capacity)
     this.seed = new Float32Array(capacity)
     this.stamp = new Int32Array(capacity)
+    this.affix = new Uint8Array(capacity)
   }
 
   spawn(x: number, y: number, type: FoeType, hp: number, seed: number): number {
@@ -137,6 +140,7 @@ export class Foes extends PoolBase {
     this.frail[i] = 1
     this.seed[i] = seed
     this.stamp[i] = this.stampCounter++
+    this.affix[i] = 0 // 재사용 슬롯의 이전 어픽스가 새 개체에 옮으면 안 된다
     return i
   }
 }

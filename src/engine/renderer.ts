@@ -25,6 +25,11 @@ const MAX_DPR = 1.5
 export class Renderer {
   readonly gl: GL
   readonly batch: SpriteBatch
+  /**
+   * 접지 그림자 전용 배치(프리멀티 알파 — 어둡게 할 수 있다).
+   * cosmos 와 본 배치 사이에 깔린다. 본 배치는 가법이라 검은 쿼드가 불가능하다.
+   */
+  readonly shadows: SpriteBatch
   readonly bloom: BloomPass
   readonly cosmos: Cosmos
   readonly atlas: Atlas
@@ -50,6 +55,7 @@ export class Renderer {
 
     this.atlas = bakeAtlas(gl)
     this.batch = new SpriteBatch(gl, this.atlas, 65536)
+    this.shadows = new SpriteBatch(gl, this.atlas, 4096, false)
     this.bloom = new BloomPass(gl, this.hdr)
     this.cosmos = new Cosmos(gl)
 
@@ -85,6 +91,7 @@ export class Renderer {
     gl.viewport(0, 0, this.width, this.height)
     // view.sx/sy 는 1/halfW, 1/halfH 다 — 역수를 취해 월드 반경을 되찾는다
     this.cosmos.render(view.x, view.y, 1 / view.sx, 1 / view.sy, time)
+    this.shadows.begin(view)
     this.batch.begin(view)
   }
 
@@ -95,6 +102,8 @@ export class Renderer {
    * 매 프레임 덮어쓰면 안 되기 때문 (docs 의 실시간 조절 API).
    */
   end(time: number, hurt = 0, danger = 0, calm = 1): void {
+    // 그림자가 먼저 깔리고, 그 위에 빛(가법 배치)이 쌓인다
+    this.shadows.end()
     this.batch.end()
     this.bloom.render(this.scene.tex, this.width, this.height, time, hurt, danger, calm)
   }

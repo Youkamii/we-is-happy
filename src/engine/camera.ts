@@ -6,6 +6,13 @@
 import type { View } from './batch'
 import { Rng } from './rng'
 
+/**
+ * 디오라마 스쿼시 — 세로축을 12% 눌러 살짝 기울여 내려다보는 느낌을 만든다.
+ * 순수 렌더 변환이라 판정·시뮬레이션과 무관하고, 원(그림자 포함)이 자연스럽게
+ * 타원이 된다. 1.0 이면 완전 탑다운.
+ */
+const SQUASH = 0.88
+
 export class Camera {
   x = 0
   y = 0
@@ -57,15 +64,16 @@ export class Camera {
     this.view.x = this.x + this.shakeX
     this.view.y = this.y + this.shakeY
     this.view.sx = 1 / halfW
-    this.view.sy = 1 / halfH
+    // 스쿼시만큼 세로 월드가 더 보인다 (halfH / SQUASH) — 컬링도 같이 커져야 한다
+    this.view.sy = SQUASH / halfH
     return this.view
   }
 
   /** 화면 밖 컬링용 — 여유를 둔 가시 반경 */
   visibleRadius(screenW: number, screenH: number): number {
     const aspect = screenW / screenH
-    const halfH = this.viewHeight * 0.5
-    const halfW = halfH * aspect
+    const halfH = this.viewHeight * 0.5 / SQUASH
+    const halfW = this.viewHeight * 0.5 * aspect
     return Math.hypot(halfW, halfH) * 1.12
   }
 

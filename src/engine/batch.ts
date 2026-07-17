@@ -76,7 +76,12 @@ export class SpriteBatch {
   /** 이번 프레임에 용량 초과로 강제 flush 된 횟수. 0이 아니면 capacity 를 늘려야 한다. */
   overflows = 0
 
-  constructor(gl: GL, atlas: Atlas, capacity = 65536) {
+  /**
+   * additive=false 면 프리멀티 알파 합성(어둡게 할 수 있다) — 그림자 패스 전용.
+   * 본 배치는 가법(모든 것이 빛)이라 검은 쿼드가 불가능해서, 접지 그림자는
+   * cosmos 와 본 배치 사이에 이 모드로 한 번 깔린다.
+   */
+  constructor(gl: GL, atlas: Atlas, capacity = 65536, private readonly additive = true) {
     this.gl = gl
     this.atlas = atlas
     this.capacity = capacity
@@ -170,7 +175,8 @@ export class SpriteBatch {
     gl.uniform1i(this.prog.uniforms['u_atlas']!, 0)
 
     gl.enable(gl.BLEND)
-    gl.blendFunc(gl.ONE, gl.ONE)
+    if (this.additive) gl.blendFunc(gl.ONE, gl.ONE)
+    else gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
 
     gl.bindVertexArray(this.vao)
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instanceVBO)
