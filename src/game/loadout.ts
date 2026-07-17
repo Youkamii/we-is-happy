@@ -171,6 +171,21 @@ export class Loadout {
       })
     }
 
+    // 무기가 하나뿐이면 **새 무기 하나는 반드시 보여준다.**
+    //
+    // 아래 시너지 가중치(7배)가 첫 레벨업부터 짝 패시브를 계속 띄우는 바람에,
+    // 짝만 쫓다 무기 1개로 1막을 버티는 빌드가 실제로 나왔다(봇 계측: Lv6 무기1,
+    // 25s 사망). 무기 하나는 어떤 것이든 화면 전체를 못 덮으므로 두 번째 무기는
+    // 생존의 하한이다 — 유혹(시너지)과 안전망(새 무기)을 나란히 보여주고 고르게 한다.
+    if (this.weapons.length === 1 && out.length < count) {
+      const news = pool.filter((c) => c.kind === 'weapon' && c.level === 1)
+      if (news.length > 0) {
+        const chosen = news[rng.int(news.length)]!
+        out.push(chosen)
+        pool.splice(pool.indexOf(chosen), 1)
+      }
+    }
+
     // 시너지에 걸린 선택지를 더 자주 띄운다. 조합이 안 굴러가면 매판 똑같아진다.
     //
     // 가중치를 3.4 로 뒀는데, 무기 6→12·패시브 6→12 로 늘리자 풀이 2배가 되면서

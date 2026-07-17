@@ -314,6 +314,12 @@ export class Game implements FireCtx {
     if (res.contactDamage > 0) {
       const crowd = 1 + Math.min(res.contactCount, 8) / 8
       if (this.player.hurt(res.contactDamage * crowd)) {
+        // 피격 반동 — 문 것들을 한 뼘(~30px) 밀어낸다.
+        // 무적이 끝나는 순간 같은 무리에게 그대로 다시 물리면 포위가 즉사 나선이
+        // 된다: 공백이 긴 시작 무기 5종(광선·신문·호·위성·혜성)이 봇 계측에서
+        // 전부 22~40s 에 여기서 죽었다. 밀어내는 한 뼘이 "맞았지만 빠져나갈 수
+        // 있다"를 만든다 — 무기별 버프 대신 보편 장치 하나로 복권을 없앤다.
+        this.pushFoes(this.player.x, this.player.y, 120, 340)
         this.camera.shake(9, 12)
         this.sfx('hurt')
       }
@@ -351,10 +357,15 @@ export class Game implements FireCtx {
 
     // 초당 스폰 예산. 막 배율 × (막 안 진행에 따른 조임) × (런 전체 가속)
     //
-    // 첫 25초는 더 완만하다. 조작을 배우기도 전에 포위당하면 아무도 두 번 안 한다 —
+    // 첫 15초는 더 완만하다. 조작을 배우기도 전에 포위당하면 아무도 두 번 안 한다 —
     // 접촉 피해를 진짜로 고치자 봇이 12~23초에 죽었고, 그건 난이도가 아니라 시작
-    // 자체를 막는 것이다. 튜토리얼이 없는 게임이라 첫 25초가 곧 튜토리얼이다.
-    const warmup = Math.min(1, 0.25 + (this.elapsed / 25) * 0.75)
+    // 자체를 막는 것이다. 튜토리얼이 없는 게임이라 첫 15초가 곧 튜토리얼이다.
+    //
+    // 바닥 0.5·램프 15s. 처음(0.25·25s)엔 같은 관찰 하나에 완화를 두 겹(여기 + 1막
+    // rate 절반)으로 쌓아서 t=25s 누적 적 수가 이전의 1/3이었다 — 봇이 죽은 건
+    // 밀도가 아니라 접촉 피해가 진짜가 된 것 때문인데, 밀도만 두 번 깎은 셈이다.
+    // 실측(t=10s 화면 적 30~46마리)에서 "군체가 밀려온다"는 그림 자체가 사라졌다.
+    const warmup = Math.min(1, 0.5 + (this.elapsed / 15) * 0.5)
     const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4) * warmup
     this.spawnTimer += dt * rate
 

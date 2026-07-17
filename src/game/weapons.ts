@@ -148,7 +148,9 @@ export const WEAPONS: readonly WeaponDef[] = [
   {
     id: W.Beam, name: '광선', desc: '별빛을 한 줄기로 모은다. 닿는 모든 것을 태운다',
     evoName: '천벌', evoDesc: '줄기가 갈라져 스스로 겨눈다',
-    evoPassive: P.Pierce, cooldown: 1.9,
+    // 1.9였을 때 시작 무기로 성립하지 않았다: 줄기당 3~5킬 × 0.53발/s ≈ 2킬/s 인데
+    // 초반 유입이 6~13/s 라 순수하게 산수에서 진다 — 봇이 51킬로 24s 사망(10종 중 유일).
+    evoPassive: P.Pierce, cooldown: 1.35,
     r: 1.00, g: 0.78, b: 0.34, shape: Shape.Prism, maxLevel: 8,
   },
   {
@@ -518,7 +520,10 @@ function fireArc(slot: WeaponSlot, ctx: FireCtx): void {
       let diff = ang - faceAng
       while (diff > Math.PI) diff -= Math.PI * 2
       while (diff < -Math.PI) diff += Math.PI * 2
-      if (Math.abs(diff) > 1.5) continue
+      // ±86°(1.5)였을 때 후방 152°가 무방비라 시작 무기로 경계선 위였다 —
+      // 봇 계측에서 판마다 간신히 생존(HP121)과 47s 사망을 오갔다. ±115°로 넓힌다.
+      // 방향성은 남는다(후방 130° 빈틈) — 전방위는 진화(회오리)의 정체성이다.
+      if (Math.abs(diff) > 2.0) continue
     }
     const d = Math.hypot(dx, dy) || 1
     // 가까울수록 강하다 — 붙어서 싸우라는 유인

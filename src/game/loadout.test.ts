@@ -172,4 +172,16 @@ describe('Loadout', () => {
     // 불씨가 선택지에 있으면 완력과 맞물린다는 힌트가 있어야 한다
     if (ember) expect(ember.hint).toContain('완력')
   })
+
+  it('무기가 하나뿐이면 새 무기가 반드시 선택지에 뜬다 (두 번째 무기는 생존의 하한)', () => {
+    // 실제로 있었던 일: 시너지 가중치(7배)가 첫 레벨업부터 짝 패시브만 계속 띄워서,
+    // 짝만 쫓다 무기 1개 Lv6 으로 1막 25초에 죽는 판이 나왔다 (봇 계측 seed 8888).
+    for (let i = 0; i < 40; i++) {
+      const choices = lo.roll(new Rng(i + 100))
+      expect(
+        choices.some((c) => c.kind === 'weapon' && c.level === 1),
+        `${i}번째 굴림`,
+      ).toBe(true)
+    }
+  })
 })

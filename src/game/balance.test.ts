@@ -50,9 +50,16 @@ interface RunStat {
  * 사람은 힌트("가시와 맞물린다")를 읽고 고른다. 봇도 그러게 해야 사람 근사가 된다 —
  * 안 그러면 봇 수치로는 조합 시스템 자체를 검증할 수 없다.
  */
-function pickChoice(cs: Choice[], rng: Rng): Choice {
+function pickChoice(cs: Choice[], rng: Rng, weaponCount: number): Choice {
   const evo = cs.find((c) => c.kind === 'evolve')
   if (evo) return evo
+  // 무기가 하나면 새 무기부터 — 한 무기는 어떤 것이든 화면 전체를 못 덮고,
+  // 사람도 초반엔 새 장난감부터 집는다. 이게 없으면 봇이 짝 패시브만 쫓다
+  // 무기 1개 Lv6 으로 25초에 죽는 퇴행 전략을 "사람 근사"라고 재게 된다.
+  if (weaponCount === 1) {
+    const nw = cs.filter((c) => c.kind === 'weapon' && c.level === 1)
+    if (nw.length > 0) return nw[rng.int(nw.length)]!
+  }
   // 힌트가 붙은 것(=진화에 가까워지는 것)을 우선한다
   const synergy = cs.filter((c) => c.hint && c.hint !== '새 무기')
   if (synergy.length > 0) return synergy[rng.int(synergy.length)]!
@@ -74,7 +81,7 @@ function playRun(seed: number, pickBest = false): RunStat {
     if (game.phase === Phase.LevelUp) {
       const cs = game.pendingChoices
       if (cs.length === 0) break
-      game.choose(pickBest ? pickChoice(cs, rng) : cs[rng.int(cs.length)]!)
+      game.choose(pickBest ? pickChoice(cs, rng, game.loadout.weapons.length) : cs[rng.int(cs.length)]!)
       continue
     }
     if (game.phase === Phase.Dead || game.phase === Phase.Won) break
