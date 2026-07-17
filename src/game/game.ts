@@ -16,7 +16,8 @@ import type { Input } from '../engine/input'
 import type { Renderer } from '../engine/renderer'
 import { Rng } from '../engine/rng'
 import {
-  ACCENT, DROP_BASE, EVENT, FIELD_BASE, FOE_BASE, FX_BASE, PLAYER_BASE, SHOT_BASE, TERRAIN_BASE,
+  ACCENT, DROP_BASE, EVENT, FIELD_BASE, FOE_BASE, FX_BASE, PLAYER_BASE, SHAPE_SPARSE, SHOT_BASE,
+  TERRAIN_BASE, conserve,
 } from '../engine/palette'
 import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
@@ -147,6 +148,18 @@ export class Game implements FireCtx {
   seed = 1
   /** 순수 연출용 시간 — 일시정지 중에도 흐른다 */
   visualTime = 0
+  /**
+   * 렌더 전용 장부 — 시뮬레이션·결정론과 무관하다.
+   * fxLumPrev: 지난 프레임 fx 가 **요구한**(감광을 곱하기 전) 화면 평균 광량.
+   *   감광 전 수요를 재므로 감광 결과에 되먹지 않는다 — 진동 없이 수렴한다.
+   * flashPrev: 지난 프레임 동시에 켜져 있던 명중 플래시 수. 광역기가 500마리를
+   *   동시에 치면 플래시 500개가 동시 점화된다 — 개당 밝기로는 못 막는 축이다.
+   */
+  private fxLumPrev = 0
+  private flashPrev = 0
+  private fxAcc = 0
+  /** 지난 프레임 화면에 그려진 적 수 — 군체 밀도 감광용 (렌더 전용) */
+  private foesPrev = 0
   /** 레벨업 대기 중인 선택지. UI 가 이걸 읽어 그린다. */
   pendingChoices: Choice[] = []
   /** 레벨업이 한 번에 여러 번 터졌을 때 밀린 횟수 */
@@ -218,6 +231,10 @@ export class Game implements FireCtx {
     this.pactFoeSpeed = 1
     this.pactHeal = 1
     this.rerollLeft = 1
+    this.fxLumPrev = 0
+    this.flashPrev = 0
+    this.fxAcc = 0
+    this.foesPrev = 0
     this.act = 0
     this.actIntro = ACT_INTRO_SECONDS
     this.bossSpawned = false
@@ -1415,17 +1432,62 @@ export class Game implements FireCtx {
 
   // ── 렌더 ─────────────────────────────────────────────────────────────
 
+  /**
+   * fx 계열 쿼드의 유일한 출구. 광량을 장부에 적고(감광 전 수요), 광량 보존
+   * 감광(크기)과 이번 프레임 감광(dim)을 곱해 민다. 적·지형·드랍·플레이어 같은
+   * **정보 계열은 여기를 지나지 않는다** — 정보는 항상 이펙트 위여야 하니까.
+   */
+  private pushFx(
+    b: SpriteBatch, cullR: number,
+    x: number, y: number, size: number, rot: number,
+    r: number, g: number, bl: number, a: number, shape: number,
+    dim: number,
+  ): void {
+    const sp = SHAPE_SPARSE[shape]!
+    // 화면 평균 광량 수요: 밝기 × (쿼드 면적 / 화면 면적). 0.5625 = 0.75²(모양 내접 근사)
+    const q = (size / cullR) * (size / cullR) * 0.5625
+    const bright = (r > g ? (r > bl ? r : bl) : g > bl ? g : bl) * a
+    this.fxAcc += bright * (sp === 1 ? 0.3 : 1) * q
+    /**
+     * 프레임 내 누진 브레이크 — 지난 프레임 장부만 보면 폭발이 터진 **그 프레임**은
+     * 무방비다(1프레임 지연 스파이크, 실측 p95 1.36). 같은 프레임 안에서 누적 수요가
+     * 무릎(0.4)을 넘는 순간부터 이후 쿼드를 제곱으로 조인다. 제곱 감쇠의 적분은
+     * 수렴하므로 **fx 층 총량이 수학적으로 유계다**: 0.4 + 1/2.2 ≈ 0.85.
+     * 수요가 무한대여도 그 위로 못 간다 — 화이트아웃이 산수로 불가능해진다.
+     */
+    const brake = 1 + Math.max(0, this.fxAcc - 0.4) * 2.2
+    const c = conserve(size, sp) * dim / (brake * brake)
+    b.push(x, y, size, rot, r * c, g * c, bl * c, a, shape)
+  }
+
   render(renderer: Renderer): void {
     const cam = this.camera
     const view = cam.toView(renderer.width, renderer.height)
     const t = this.visualTime
 
-    // 이펙트 자동 감광. 개별 밝기는 palette 위계로 지켜도 가법 블렌딩은 **겹침 수**로
-    // 화면을 태운다 — 실플레이에서 후반 이펙트가 게임 자체를 가렸다(연출 예산과 한 쌍,
-    // fx.ts 참고). 입자·탄이 붐빌수록 이번 프레임의 연출 밝기와 bloom 을 낮춘다.
+    // 이펙트 자동 감광 — 세 겹이다. 개별 밝기는 palette 위계가 지키지만 가법 블렌딩은
+    // **겹침 수 × 크기**로도 화면을 태운다(세 번째 실플레이 보고까지 온 문제).
+    //  ① 개수 부하: 입자·탄이 붐빌수록 (기존)
+    //  ② 광량 폐루프: 지난 프레임 fx 의 광량 **수요**(감광 전)가 예산을 넘으면 초과분만큼.
+    //     수요 기준이라 감광 결과에 되먹지 않는다 — 진동 없이 수렴한다.
+    //  ③ 플래시 부하: 동시에 켜진 명중 플래시 수 — 광역기 한 방이 500마리를 치면
+    //     개당 밝기와 무관하게 500개가 동시 점화되는 축.
+    // 크기 축은 pushFx 의 광량 보존(palette.conserve)이 정적으로 막는다.
     // 한산하면 화려하게, 혼잡하면 차분하게 — 정보(적·나·지형)는 항상 이펙트 위다.
     const fxLoad = Math.min(1, this.motes.count / 14000 + this.shots.count / 2800)
+    // over 는 bloom(calm)에만 쓴다 — fx 쿼드 자체는 pushFx 의 프레임 내 브레이크가
+    // 지연 없이 조이므로, 여기서 또 곱하면 이중 처벌로 이펙트가 실종된다.
+    const over = Math.max(0, this.fxLumPrev - 0.45)
     const fxDim = 1 - 0.5 * fxLoad
+    const hitDim = Math.min(1, 48 / Math.max(1, this.flashPrev))
+    // 군체 밀도 감광 — 최악 프레임 계측에서 화면을 태운 건 이펙트가 아니라 **적 몸
+    // 그 자체**였다(Hex 몸 1.08 vs fx 전체 0.25). 가법 블렌딩에서는 몸도 빛이라
+    // 밀집이 곧 백색이다. "전부 밝으면 아무것도 안 밝다"를 군체에도 적용한다 —
+    // 수가 많을수록 기준선을 낮춘다. 종족 구분은 hue 가 하므로 판독은 산다.
+    const foeDim = Math.min(1, 520 / Math.max(1, this.foesPrev))
+    let drawnFoes = 0
+    this.fxAcc = 0
+    let flashCount = 0
 
     // 성운 색은 막을 따라 서서히 옮겨간다. 갑자기 바뀌면 이질적이라
     // 3막쯤에서 "언제 이렇게 붉어졌지"가 되는 게 목표다.
@@ -1540,7 +1602,11 @@ export class Game implements FireCtx {
       const flash = foes.flash[i]!
       // 맞은 순간 밝아진다. 이거 하나로 타격감이 사는데, 배율이 크면 후반에
       // 초당 수천 번 터져서 화면이 하얘진다 — ACCENT 안에서만 놀고, 붐비면 더 줄인다.
-      const hit = flash > 0 ? 1 + flash * (ACCENT * 3.5) * fxDim : 1
+      // hitDim: 광역기가 수백 마리를 **동시에** 칠 때는 동시 점화 수 자체를 조인다.
+      if (flash > 0) flashCount++
+      // 배율 3.5 → 2.4: hitDim 은 지난 프레임 기준이라 광역기 일제 명중의 **첫**
+      // 프레임은 무방비다 — 베이스 자체가 그 한 프레임을 버틸 수 있어야 한다.
+      const hit = flash > 0 ? 1 + flash * (ACCENT * 2.4) * fxDim * hitDim : 1
       const hpFrac = foes.hp[i]! / foes.maxHp[i]!
       // 피가 닳으면 어두워진다 — 체력바 없이 상태를 읽게
       const dim = 0.45 + hpFrac * 0.55
@@ -1558,8 +1624,9 @@ export class Game implements FireCtx {
         const dashSp = Math.hypot(foes.vx[i]!, foes.vy[i]!)
         if (dashSp > 260) drawY = y + Math.min(9, (dashSp - 260) * 0.045)
       }
-      // 보스는 하나뿐이라 밝아도 안전하다. 잡졸은 기준선을 지킨다.
-      const lum = (isBoss ? ACCENT : FOE_BASE) * hit * dim
+      drawnFoes++
+      // 보스는 하나뿐이라 밝아도 안전하다. 잡졸은 기준선을 지키고, 붐비면 함께 낮춘다.
+      const lum = (isBoss ? ACCENT : FOE_BASE * foeDim) * hit * dim
       b.push(
         x, drawY, size, foeRotation(foes, i, t),
         (stat.r + fire * 0.85) * lum,
@@ -1605,8 +1672,10 @@ export class Game implements FireCtx {
       const rad = shots.radius[i]!
       // 잔상은 공통, 본체는 무기가 정한 모양. WeaponDef.shape 를 아무도 안 읽어서
       // 무기 6종의 탄이 전부 똑같은 구슬이었다.
-      b.push(x, y, rad * 2.5, rot, cr * 0.5, cg * 0.5, cb * 0.5, 1, Shape.Spark)
-      b.push(x, y, rad * 1.25, rot, cr, cg, cb, 1, def.shape)
+      // 잔상은 fx(감광 대상), 본체는 정보 쪽이지만 범위 스탯으로 커지므로
+      // 광량 보존(크기 감광)은 태운다 — 거대 혜성 하나가 화면 한 켠을 태우면 안 된다.
+      this.pushFx(b, cullR, x, y, rad * 2.5, rot, cr * 0.5, cg * 0.5, cb * 0.5, 1, Shape.Spark, fxDim)
+      this.pushFx(b, cullR, x, y, rad * 1.25, rot, cr, cg, cb, 1, def.shape, 1)
     }
 
     // 파티클
@@ -1622,10 +1691,10 @@ export class Game implements FireCtx {
       const shape = motes.shape[i]!
       // 링은 커지며 사라지고, 나머지는 작아지며 사라진다
       const size = shape === Shape.Ring ? motes.size[i]! * (2 - frac) : motes.size[i]! * frac
-      b.push(
-        x, y, size, motes.rot[i]!,
-        motes.r[i]! * frac * fxDim, motes.g[i]! * frac * fxDim, motes.b[i]! * frac * fxDim, frac,
-        shape,
+      this.pushFx(
+        b, cullR, x, y, size, motes.rot[i]!,
+        motes.r[i]! * frac, motes.g[i]! * frac, motes.b[i]! * frac, frac,
+        shape, fxDim,
       )
     }
 
@@ -1649,12 +1718,12 @@ export class Game implements FireCtx {
           const spin = t * (evo ? 3.4 : 1.8) + seed * 6.283
           const pulse = 1 + Math.sin(t * 7 + seed * 10) * 0.06
           const k = FIELD_BASE
-          b.push(x, y, r * 0.55 * pulse, spin, k * 1.1, k * 0.35, k * 2.2, 1, Shape.Singularity)
-          b.push(x, y, r * 0.95, -spin * 0.5, k * 0.5, k * 0.15, k * 1.1, 1, Shape.Vortex)
+          this.pushFx(b, cullR, x, y, r * 0.55 * pulse, spin, k * 1.1, k * 0.35, k * 2.2, 1, Shape.Singularity, fxDim)
+          this.pushFx(b, cullR, x, y, r * 0.95, -spin * 0.5, k * 0.5, k * 0.15, k * 1.1, 1, Shape.Vortex, fxDim)
           if (evo) {
             // 삼킨 만큼 밝아진다 — 곧 터진다는 신호. 이건 경고라 밝아도 된다.
             const charge = Math.min(1, f.charge[i]! * 0.02)
-            b.push(x, y, r * 0.4 * (1 + charge), spin * 2, ACCENT * charge, 0.4 * charge, ACCENT * 1.2 * charge, 1, Shape.Nova)
+            this.pushFx(b, cullR, x, y, r * 0.4 * (1 + charge), spin * 2, ACCENT * charge, 0.4 * charge, ACCENT * 1.2 * charge, 1, Shape.Nova, fxDim)
           }
           break
         }
@@ -1662,20 +1731,20 @@ export class Game implements FireCtx {
           // 문양은 바닥에 새겨진 것이라 옅어야 한다 — 밝게 그렸더니 화면 중앙이
           // 흰 링으로 덮여서 적이 안 보였다.
           const a = FIELD_BASE * (0.5 + frac * 0.5)
-          b.push(x, y, r * 1.1, seed * 6.283 + t * 0.4, a * 1.5, a * 1.25, a * 0.3, 1, Shape.Sigil)
-          if (evo) b.push(x, y, r * 0.5, -t * 1.2, a * 1.7, a * 1.4, a * 0.35, 1, Shape.Rune)
+          this.pushFx(b, cullR, x, y, r * 1.1, seed * 6.283 + t * 0.4, a * 1.5, a * 1.25, a * 0.3, 1, Shape.Sigil, fxDim)
+          if (evo) this.pushFx(b, cullR, x, y, r * 0.5, -t * 1.2, a * 1.7, a * 1.4, a * 0.35, 1, Shape.Rune, fxDim)
           break
         }
         case Field.Still: {
           // 정지장은 시간이 멎은 느낌이라 아주 천천히 돈다
           const a = FIELD_BASE * (0.6 + frac * 0.6)
-          b.push(x, y, r * 1.05, t * 0.25 + seed, a * 0.3, a * 0.9, a * 1.9, 1, Shape.Halo)
-          b.push(x, y, r * 0.7, -t * 0.18, a * 0.2, a * 0.6, a * 1.5, 1, Shape.Ring)
+          this.pushFx(b, cullR, x, y, r * 1.05, t * 0.25 + seed, a * 0.3, a * 0.9, a * 1.9, 1, Shape.Halo, fxDim)
+          this.pushFx(b, cullR, x, y, r * 0.7, -t * 0.18, a * 0.2, a * 0.6, a * 1.5, 1, Shape.Ring, fxDim)
           break
         }
         case Field.Echo: {
           const grow = 2 - frac
-          b.push(x, y, r * grow, seed * 6.283, FIELD_BASE * 0.5 * frac, FIELD_BASE * 1.6 * frac, FIELD_BASE * 2.0 * frac, 1, Shape.Rift)
+          this.pushFx(b, cullR, x, y, r * grow, seed * 6.283, FIELD_BASE * 0.5 * frac, FIELD_BASE * 1.6 * frac, FIELD_BASE * 2.0 * frac, 1, Shape.Rift, fxDim)
           break
         }
       }
@@ -1716,6 +1785,11 @@ export class Game implements FireCtx {
     // 체력 30% 아래부터 화면이 조여든다. 숫자를 읽지 않아도 "죽는다"가 느껴져야 한다.
     const hpFrac = p.alive ? p.hp / p.stats.maxHp : 0
     const danger = p.alive ? Math.max(0, 1 - hpFrac / 0.3) : 0
-    renderer.end(t, p.hurtFlash, danger, 1 - 0.6 * fxLoad)
+    // 다음 프레임의 감광이 먹을 장부 마감. bloom(calm)도 광량 초과분만큼 함께 죽인다 —
+    // 씬이 이미 밝은데 bloom 이 그 위에 또 얹히면 감광이 헛돈다.
+    this.fxLumPrev = this.fxAcc
+    this.flashPrev = flashCount
+    this.foesPrev = drawnFoes
+    renderer.end(t, p.hurtFlash, danger, Math.min(1 - 0.6 * fxLoad, 1 / (1 + over * 2.4)))
   }
 }

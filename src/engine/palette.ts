@@ -1,3 +1,5 @@
+import { Shape } from './shapes'
+
 /**
  * 밝기 위계 — 이 게임의 시각 규칙 단일 진실.
  *
@@ -42,3 +44,37 @@ export const FX_BASE = 0.5
 
 /** 지속 효과체(필드). 바닥에 깔린 것이라 적보다 어둡다. */
 export const FIELD_BASE = 0.42
+
+// ── 광량 보존 ──────────────────────────────────────────────────────────
+
+/**
+ * 윤곽 모양(링·광륜·인장·소용돌이…) — 쿼드 면적 대비 실제로 빛나는 픽셀이
+ * 둘레 비례라, 채움 모양과 감광 지수가 달라야 한다. 렌더 hot path 라 Set 대신 표.
+ */
+export const SHAPE_SPARSE = new Uint8Array(24)
+for (const s of [
+  Shape.Ring, Shape.Halo, Shape.Sigil, Shape.Vortex, Shape.Singularity,
+  Shape.Rift, Shape.Rune, Shape.Crack, Shape.Nova,
+]) SHAPE_SPARSE[s] = 1
+
+/**
+ * 광량 보존 감광 — 세 번째 실플레이 보고("범위 확장 몇 번이면 화면이 하얘진다")의
+ * 구조적 해답.
+ *
+ * 가법 블렌딩에서 쿼드가 화면에 더하는 빛은 **밝기 × 면적**이다. 크기가 스탯
+ * (범위·폭심)으로 커질 때 밝기가 그대로면 방출 광량이 크기²로 폭증한다 —
+ * 범위 ×2.5 = 빛 ×6, 무기 6종이 겹치면 ACES 톤매퍼가 포화돼 백색이 된다
+ * (fxbudget.test 실측: 중심 광량 p95 = 3.66, 상한의 3.7배).
+ *
+ * 그래서 기준 크기를 넘는 fx 쿼드는 넘친 만큼 어두워진다. 채움 모양은 면적 비례라
+ * 지수 1.5, 윤곽 모양은 둘레 비례라 지수 1. 개별 밝기 위계(위 규칙)와 직교하는
+ * 세 번째 축이다: 밝기 위계(개당) × 연출 예산(개수, fx.ts) × 광량 보존(크기).
+ */
+export function conserve(size: number, sparse: number): number {
+  if (sparse === 1) return size > 80 ? 80 / size : 1
+  if (size <= 46) return 1
+  const k = 46 / size
+  // 지수 2 = 순수 에너지 보존. 1.5 로 시작했더니 최악 빌드 p95 가 1.39 로 상한(1.0)을
+  // 넘었다 — 위성·광선의 130px 급 쿼드가 여전히 화면 광량의 주범이었다(실측).
+  return k * k
+}
