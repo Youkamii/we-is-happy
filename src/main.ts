@@ -213,7 +213,7 @@ function boot(): void {
       center.appendChild(d)
     }
     line('EMBERTIDE', 'font-size:52px;letter-spacing:.3em;color:#ffd9a8')
-    line('꺼져가는 별의 마지막 불씨 — 15분을 버틴다', 'margin-top:10px;font-size:15px;color:#a9bdd4')
+    line('죽은 별의 심장이 뛴다 — 지평선 위에서 15분', 'margin-top:10px;font-size:15px;color:#a9bdd4')
     line('이동  WASD · 방향키 · 마우스 홀드 · 터치 드래그', 'margin-top:30px;font-size:14px;color:#8fa8c4;line-height:2')
     line('공격은 자동이다 — 움직임이 전부다', 'font-size:14px;color:#8fa8c4;line-height:2')
     line('P 일시정지 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')

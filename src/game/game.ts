@@ -273,7 +273,10 @@ export class Game implements FireCtx {
    * 여기 하나로 플레이어·적·드랍이 함께 숨쉰다.
    */
   private holeSurge(): number {
-    if (this.feeding()) return 5.2
+    // 5.2로 뒀더니 포식이 지평선 3배 반경을 8마디마다 공짜 청소해 후반 밀도가
+    // 무너졌다(봇 완주 3/6 → 4/6, 평균 킬 13만 → 20만). 3.8이면 잔챙이만 쓸리고
+    // 굵은 것은 끌려오기만 한다 — 스펙터클은 남고 청소는 준다.
+    if (this.feeding()) return 3.8
     if (this.beatClock % 4 < 0.5) return 2.6
     return 1
   }
@@ -588,7 +591,11 @@ export class Game implements FireCtx {
     // 밀도가 아니라 접촉 피해가 진짜가 된 것 때문인데, 밀도만 두 번 깎은 셈이다.
     // 실측(t=10s 화면 적 30~46마리)에서 "군체가 밀려온다"는 그림 자체가 사라졌다.
     const warmup = Math.min(1, 0.5 + (this.elapsed / 15) * 0.5)
-    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4) * warmup * this.pactSpawn
+    // 포식 중엔 1.6배 — 블랙홀이 들이쉬면 그만큼 새로 밀려온다. 포식이 삼킨
+    // 밀도를 되채워야 "주기적 공짜 청소"가 안 된다 (rng 스트림엔 영향 없다:
+    // 예산 누적만 빨라질 뿐 주사위 순서는 그대로다).
+    const feedMul = this.feeding() ? 1.6 : 1
+    const rate = (18 + inAct * 46) * act.rate * (1 + overall * 1.4) * warmup * this.pactSpawn * feedMul
     this.spawnTimer += dt * rate
 
     // 체력: 막 배율에 막 안 진행분을 얹는다 (+ 계약)
