@@ -332,7 +332,8 @@ export class Fields extends PoolBase {
 export const Drop = {
   Xp: 0,
   Heal: 1,
-  // Cache(잔해 드랍 타입)가 선언돼 있었지만 잔해 보상은 Xp/Heal 로 뿌려져 참조 0이었다 (#9).
+  /** 성흔 — 극히 드물게 떨어진다(판당 1~3개). 먹으면 맵의 모든 경험치가 날아온다. */
+  Vacuum: 2,
 } as const
 export type DropType = (typeof Drop)[keyof typeof Drop]
 

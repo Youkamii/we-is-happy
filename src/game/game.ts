@@ -5,8 +5,8 @@
  * 밸런스가 달라지고, 협동에서 두 대의 결과가 갈린다.
  */
 import {
-  ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BOSS_AT, RUN_SECONDS, actIndexAt, actProgressAt,
-  type ActDef,
+  ACT_BEATS, ACT_INTRO_SECONDS, ACT_SECONDS, ACTS, BEATS, BOSS_AT, RUN_SECONDS,
+  actIndexAt, actProgressAt, type ActDef,
 } from './acts'
 import type { SpriteBatch } from '../engine/batch'
 import type { SfxName } from '../engine/audio'
@@ -21,7 +21,9 @@ import {
 import { Shape } from '../engine/shapes'
 import { burst, shockwave, smoke, spray, updateMotes } from './fx'
 import { drawHealthRing, drawOffscreenMarker, drawXpArc } from './hud3d'
-import { BOSS_SCALE, FOE_STATS, foeRotation, spawnCluster, spawnRing, updateFoes } from './foes'
+import {
+  BOSS_SCALE, FOE_STATS, foeRotation, spawnCluster, spawnFormation, spawnRing, updateFoes,
+} from './foes'
 import { Boss, BossState } from './boss'
 import { Loadout, type Choice } from './loadout'
 import { xpForLevel } from './player'
@@ -148,6 +150,20 @@ export class Game implements FireCtx {
   pendingChoices: Choice[] = []
   /** 레벨업이 한 번에 여러 번 터졌을 때 밀린 횟수 */
   private pendingLevels = 0
+  /** 살아 있는 성흔(진공) 수 — 동시에 1개만. 흔치 않아야 사건이 된다. */
+  private vacuumOut = 0
+  /**
+   * 다음 성흔 주사위 시각. **킬마다 굴리면 안 된다** — 킬 경로에 rng 소비를 하나
+   * 끼웠더니 난수 스트림 전체가 밀려 봇 계측이 통째로 재섞였다(가시 시작이 46s 에
+   * 죽는 회귀를 earlygame.test 가 즉시 잡았다). 60초부터 45초 간격의 시각 기반
+   * 주사위(p=0.08)면 판당 기대 ~1.5개에, 첫 60초의 스트림은 한 비트도 안 변한다.
+   */
+  private nextVacuumRoll = 60
+  /** 다음 압박 비트 시각. 균일한 스폰만으론 몇 분이면 루즈해진다 — acts.ts BEATS 참고. */
+  private nextBeatAt = 35
+  /** 방금 발동한 비트 이름 — main 이 읽어 작은 배너로 띄운다 (연출 전용) */
+  beatName = ''
+  beatIntro = 0
   /**
    * 이번 프레임에 낼 소리. Game 이 Audio 를 직접 들면 시뮬레이션이 브라우저에
    * 묶여서 테스트가 안 돈다 — 큐에 쌓고 main 이 소비한다.
@@ -182,6 +198,11 @@ export class Game implements FireCtx {
     this.phase = Phase.Playing
     this.pendingChoices = []
     this.pendingLevels = 0
+    this.vacuumOut = 0
+    this.nextVacuumRoll = 60
+    this.nextBeatAt = 35
+    this.beatName = ''
+    this.beatIntro = 0
     this.act = 0
     this.actIntro = ACT_INTRO_SECONDS
     this.bossSpawned = false
@@ -342,6 +363,8 @@ export class Game implements FireCtx {
     this.updateDrops(dt)
     updateMotes(this.motes, dt)
     this.spawn(dt)
+    this.tickBeats(dt)
+    this.tickVacuum()
 
     this.tickActs(dt)
 
@@ -619,6 +642,64 @@ export class Game implements FireCtx {
     burst(this.motes, this.foes.x[i]!, this.foes.y[i]!, 34, EVENT * 0.8, 0.5, 0.7, 400, 1.0, 9, Shape.Crown)
     this.camera.shake(18, 6)
     this.sfx('evolve')
+  }
+
+  /**
+   * 압박 비트 — 26~40초마다 이름 붙은 전투 상황 하나가 한 방향에서 밀려온다.
+   *
+   * 균일한 스폰 흐름은 "안전한 원 그리기"로 수렴해 몇 분이면 자동사냥 구경이 된다
+   * (실플레이: "루즈하다"). 비트는 예고(오는 방향의 파문 + 배너) → 대응(자리 잡기)
+   * → 해소(몰살 = XP 뭉치)의 짧은 arc 를 만든다. 보스와는 겹치지 않는다 —
+   * 고비 둘이 포개지면 읽을 수 없는 사고가 된다.
+   */
+  private tickBeats(dt: number): void {
+    if (this.beatIntro > 0) this.beatIntro = Math.max(0, this.beatIntro - dt)
+    if (this.elapsed < this.nextBeatAt) return
+    // 마지막 25초는 피날레(5막 보스)의 시간이다
+    if (this.elapsed > RUN_SECONDS - 25) return
+    if (this.boss.idx >= 0) {
+      this.nextBeatAt = this.elapsed + 10
+      return
+    }
+    const table = ACT_BEATS[this.act]!
+    const beat = BEATS[table[this.rng.int(table.length)]!]!
+    const bearing = this.rng.next() * Math.PI * 2
+    const hpScale = ACTS[this.act]!.hp * (1 + actProgressAt(this.elapsed) * 0.55) * beat.hpMul
+    spawnFormation(
+      this.foes, beat.type, beat.form, beat.count,
+      this.player.x, this.player.y, bearing, hpScale, this.randFn, WORLD_R,
+    )
+    // 예고: 오는 방향에 파문 — "어디서"가 보여야 자리 잡기가 결정이 된다
+    const hx = this.player.x + Math.cos(bearing) * 540
+    const hy = this.player.y + Math.sin(bearing) * 540
+    shockwave(this.motes, hx, hy, 300, 1.5, 0.55, 0.25, 1.0)
+    this.camera.shake(5, 10)
+    this.sfx('bolt')
+    this.beatName = beat.name
+    this.beatIntro = 2.2
+    this.nextBeatAt = this.elapsed + 26 + this.rng.next() * 14
+  }
+
+  /**
+   * 성흔(진공) 등장 판정 — 60초부터 45초마다 주사위 하나(p=0.08, 판당 기대 ~1.5개).
+   * 화면 가장자리쯤(380~620px)에 떨어져 "주우러 갈까"가 선택이 된다.
+   * 먹으면 맵의 모든 경험치가 날아온다 (updateDrops 의 Vacuum 분기).
+   */
+  private tickVacuum(): void {
+    if (this.elapsed < this.nextVacuumRoll) return
+    this.nextVacuumRoll += 45
+    const roll = this.rng.next()
+    if (roll >= 0.08 || this.vacuumOut !== 0) return
+    const a = this.rng.next() * Math.PI * 2
+    const d = 380 + this.rng.next() * 240
+    let x = this.player.x + Math.cos(a) * d
+    let y = this.player.y + Math.sin(a) * d
+    // 월드 밖이면 반대편으로 접는다 (스폰 링과 같은 규칙)
+    if (Math.hypot(x, y) > WORLD_R * 0.9) {
+      x = this.player.x - Math.cos(a) * d
+      y = this.player.y - Math.sin(a) * d
+    }
+    if (this.drops.spawn(x, y, 0, 0, 0, Drop.Vacuum) >= 0) this.vacuumOut = 1
   }
 
   /**
@@ -1182,17 +1263,21 @@ export class Game implements FireCtx {
        *
        * 자석에 걸린 것은 안 죽는다 — 이미 오고 있으니 뺏으면 그게 더 억울하다.
        */
-      if (drops.pulled[i] === 0 && drops.age[i]! > DROP_LIFE) {
+      // 성흔은 수명이 없다 — 판당 한둘뿐인 것이 조용히 증발하면 억울하다
+      if (drops.pulled[i] === 0 && drops.age[i]! > DROP_LIFE && drops.type[i] !== Drop.Vacuum) {
         drops.kill(i)
         continue
       }
 
       if (drops.pulled[i] === 0 && d2 < magnet2) drops.pulled[i] = 1
 
-      if (drops.pulled[i] === 1) {
-        // 가까울수록 빨라진다 — 빨려 들어가는 손맛
+      if (drops.pulled[i]! >= 1) {
+        // 가까울수록 빨라진다 — 빨려 들어가는 손맛.
+        // 2 = 성흔이 부른 것. 맵 반대편(~2600px)에서도 몇 초 안에 닿아야
+        // "전부 날아온다"가 사건으로 느껴진다.
         const d = Math.sqrt(d2) || 1
-        const pull = 340 + (1 - Math.min(1, d / magnet)) * 900
+        const boost = drops.pulled[i] === 2 ? 5 : 1
+        const pull = (340 + (1 - Math.min(1, d / magnet)) * 900) * boost
         drops.vx[i]! += (dx / d) * pull * dt
         drops.vy[i]! += (dy / d) * pull * dt
       }
@@ -1211,6 +1296,15 @@ export class Game implements FireCtx {
         } else if (type === Drop.Heal) {
           p.heal(drops.value[i]!)
           shockwave(this.motes, p.x, p.y, 40, 0.25, 1.4, 0.6, 0.35)
+        } else if (type === Drop.Vacuum) {
+          // 성흔 발동 — 맵의 모든 경험치가 날아온다
+          this.vacuumOut = 0
+          for (let k = 0; k < drops.high; k++) {
+            if (drops.alive[k] === 1 && drops.type[k] === Drop.Xp) drops.pulled[k] = 2
+          }
+          shockwave(this.motes, p.x, p.y, 920, EVENT * 0.9, EVENT * 0.6, EVENT * 1.1, 1.2)
+          this.camera.shake(13, 7)
+          this.sfx('evolve')
         }
         drops.kill(i)
       }
@@ -1244,6 +1338,13 @@ export class Game implements FireCtx {
     const cam = this.camera
     const view = cam.toView(renderer.width, renderer.height)
     const t = this.visualTime
+
+    // 이펙트 자동 감광. 개별 밝기는 palette 위계로 지켜도 가법 블렌딩은 **겹침 수**로
+    // 화면을 태운다 — 실플레이에서 후반 이펙트가 게임 자체를 가렸다(연출 예산과 한 쌍,
+    // fx.ts 참고). 입자·탄이 붐빌수록 이번 프레임의 연출 밝기와 bloom 을 낮춘다.
+    // 한산하면 화려하게, 혼잡하면 차분하게 — 정보(적·나·지형)는 항상 이펙트 위다.
+    const fxLoad = Math.min(1, this.motes.count / 14000 + this.shots.count / 2800)
+    const fxDim = 1 - 0.5 * fxLoad
 
     // 성운 색은 막을 따라 서서히 옮겨간다. 갑자기 바뀌면 이질적이라
     // 3막쯤에서 "언제 이렇게 붉어졌지"가 되는 게 목표다.
@@ -1335,6 +1436,11 @@ export class Game implements FireCtx {
       } else if (type === Drop.Heal) {
         // 회복은 드무니까 눈에 띄어도 된다
         b.push(x, y, 12 * bob, t * 1.4, 0.3, 1.5, 0.7, 1, Shape.Star)
+      } else if (type === Drop.Vacuum) {
+        // 성흔 — 판당 한둘뿐. 희귀한 것만 이 밝기를 쓸 자격이 있다 (EVENT 규칙).
+        const pulse = 1 + Math.sin(t * 5 + drops.age[i]!) * 0.25
+        b.push(x, y, 24 * pulse, -t * 0.8, 0.9, 0.35, 1.5, 1, Shape.Halo)
+        b.push(x, y, 14 * bob, t * 2.2, EVENT * 0.85, 0.45, EVENT, 1, Shape.Sigil)
       }
     }
 
@@ -1352,8 +1458,8 @@ export class Game implements FireCtx {
       const stat = FOE_STATS[foes.type[i]!]!
       const flash = foes.flash[i]!
       // 맞은 순간 밝아진다. 이거 하나로 타격감이 사는데, 배율이 크면 후반에
-      // 초당 수천 번 터져서 화면이 하얘진다 — ACCENT 안에서만 논다.
-      const hit = flash > 0 ? 1 + flash * (ACCENT * 3.5) : 1
+      // 초당 수천 번 터져서 화면이 하얘진다 — ACCENT 안에서만 놀고, 붐비면 더 줄인다.
+      const hit = flash > 0 ? 1 + flash * (ACCENT * 3.5) * fxDim : 1
       const hpFrac = foes.hp[i]! / foes.maxHp[i]!
       // 피가 닳으면 어두워진다 — 체력바 없이 상태를 읽게
       const dim = 0.45 + hpFrac * 0.55
@@ -1393,8 +1499,9 @@ export class Game implements FireCtx {
       const def = WEAPONS[w & 127]!
       const evo = w >= 128
       // 진화탄만 1.0 을 넘긴다 — "진화했다"를 화면으로 알리는 유일한 수단이라
-      // 특권을 여기 몰아준다.
-      const k = evo ? ACCENT : SHOT_BASE
+      // 특권을 여기 몰아준다. 단 탄막이 붐비면 특권도 줄인다 — 수백 발이 동시에
+      // 번지면 특권이 아니라 공해다.
+      const k = evo ? ACCENT * (1 - 0.4 * fxLoad) : SHOT_BASE
       const cr = def.r * k
       const cg = def.g * k
       const cb = def.b * k
@@ -1420,7 +1527,7 @@ export class Game implements FireCtx {
       const size = shape === Shape.Ring ? motes.size[i]! * (2 - frac) : motes.size[i]! * frac
       b.push(
         x, y, size, motes.rot[i]!,
-        motes.r[i]! * frac, motes.g[i]! * frac, motes.b[i]! * frac, frac,
+        motes.r[i]! * frac * fxDim, motes.g[i]! * frac * fxDim, motes.b[i]! * frac * fxDim, frac,
         shape,
       )
     }
@@ -1508,6 +1615,6 @@ export class Game implements FireCtx {
     // 체력 30% 아래부터 화면이 조여든다. 숫자를 읽지 않아도 "죽는다"가 느껴져야 한다.
     const hpFrac = p.alive ? p.hp / p.stats.maxHp : 0
     const danger = p.alive ? Math.max(0, 1 - hpFrac / 0.3) : 0
-    renderer.end(t, p.hurtFlash, danger)
+    renderer.end(t, p.hurtFlash, danger, 1 - 0.6 * fxLoad)
   }
 }

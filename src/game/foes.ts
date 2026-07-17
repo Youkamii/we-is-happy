@@ -408,6 +408,58 @@ export function spawnRing(
 }
 
 /**
+ * 압박 비트 진형 스폰. 한 방향(bearing)에서 뭉쳐 오는 게 핵심이다 —
+ * 사방 균일 스폰과 달리 "어디서 오는지"가 정보가 되고, 자리 잡기가 결정이 된다.
+ * form: 0 = 쐐기(한 방향 덩어리), 1 = 올가미(포위 링), 2 = 호송대(진행선에 수직 행렬).
+ */
+export function spawnFormation(
+  foes: Foes,
+  type: FoeType,
+  form: number,
+  count: number,
+  px: number,
+  py: number,
+  bearing: number,
+  hpScale: number,
+  rand: () => number,
+  worldR: number,
+): void {
+  const stat = FOE_STATS[type]!
+  const dirX = Math.cos(bearing)
+  const dirY = Math.sin(bearing)
+  const perpX = -dirY
+  const perpY = dirX
+  for (let k = 0; k < count; k++) {
+    let x: number
+    let y: number
+    if (form === 1) {
+      // 올가미 — 사방에서 균등하게 조여온다 (bearing 은 위상만 준다)
+      const a = bearing + (k / count) * Math.PI * 2 + rand() * 0.2
+      const d = 520 + rand() * 90
+      x = px + Math.cos(a) * d
+      y = py + Math.sin(a) * d
+    } else if (form === 2) {
+      // 호송대 — 진행선에 수직으로 한 줄, 벽처럼 가로지른다
+      const off = (k - (count - 1) * 0.5) * 130
+      x = px + dirX * 640 + perpX * off
+      y = py + dirY * 640 + perpY * off
+    } else {
+      // 쐐기 — 한 방향에서 덩어리로 밀려온다
+      x = px + dirX * (620 + rand() * 160) + perpX * (rand() - 0.5) * 280
+      y = py + dirY * (620 + rand() * 160) + perpY * (rand() - 0.5) * 280
+    }
+    // 월드 밖이면 안쪽으로 눌러 담는다 — 접으면(반대편) 진형이 깨진다
+    const rr = Math.hypot(x, y)
+    if (rr > worldR * 0.95) {
+      const s = (worldR * 0.95) / rr
+      x *= s
+      y *= s
+    }
+    if (foes.spawn(x, y, type, stat.hp * hpScale, rand()) < 0) return
+  }
+}
+
+/**
  * 보스 크기 배율. **렌더와 판정이 같은 값을 써야 한다.**
  *
  * 렌더만 3.4배로 키우고 판정은 원본을 썼더니 보이는 몸통의 71%가 관통 불가 허상이었다 —

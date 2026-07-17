@@ -269,7 +269,7 @@ export class BloomPass {
    */
   render(
     sceneTex: WebGLTexture, screenW: number, screenH: number,
-    time: number, hurt: number, danger = 0,
+    time: number, hurt: number, danger = 0, calm = 1,
   ): void {
     const gl = this.gl
     const s = this.settings
@@ -325,7 +325,8 @@ export class BloomPass {
     gl.activeTexture(gl.TEXTURE1)
     gl.bindTexture(gl.TEXTURE_2D, m0.tex)
     gl.uniform1i(this.composite.uniforms['u_bloom']!, 1)
-    gl.uniform1f(this.composite.uniforms['u_bloomStrength']!, s.strength)
+    // calm: 화면이 붐빌수록 게임이 낮춰 보내는 프레임 단위 배율 (settings 는 불변)
+    gl.uniform1f(this.composite.uniforms['u_bloomStrength']!, s.strength * calm)
     gl.uniform1f(this.composite.uniforms['u_time']!, time)
     gl.uniform1f(this.composite.uniforms['u_hurt']!, hurt)
     gl.uniform1f(this.composite.uniforms['u_danger']!, danger)

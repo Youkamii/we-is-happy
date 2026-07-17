@@ -88,10 +88,15 @@ export class Renderer {
     this.batch.begin(view)
   }
 
-  /** 배치를 뱉고 포스트 체인을 태워 화면에 올린다. */
-  end(time: number, hurt = 0, danger = 0): void {
+  /**
+   * 배치를 뱉고 포스트 체인을 태워 화면에 올린다.
+   * calm(0..1] 은 이번 프레임 bloom 강도 배율 — 화면이 이펙트로 붐빌수록 게임이
+   * 낮춰 보낸다. settings.strength 를 직접 만지지 않는 이유: 콘솔 튜닝 값을
+   * 매 프레임 덮어쓰면 안 되기 때문 (docs 의 실시간 조절 API).
+   */
+  end(time: number, hurt = 0, danger = 0, calm = 1): void {
     this.batch.end()
-    this.bloom.render(this.scene.tex, this.width, this.height, time, hurt, danger)
+    this.bloom.render(this.scene.tex, this.width, this.height, time, hurt, danger, calm)
   }
 
   // aspect 게터가 있었지만 호출부 0이라 지웠다 (#9).

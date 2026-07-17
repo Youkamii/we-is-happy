@@ -50,6 +50,39 @@ export interface ActDef {
  * (한때 여기 적혔던 190/13,500hp 는 구조 수정 전의 시도값이다. 코드는 내려갔는데
  * 주석이 옛 서사를 계속 주장하고 있었다 — 주석도 계측 대상이다.)
  */
+/**
+ * 압박 비트 — 25~40초마다 삽입되는 이름 붙은 전투 상황.
+ *
+ * 균일한 스폰 흐름은 몇 분이면 "자동사냥 구경"이 된다(실플레이: "루즈하다").
+ * 비트는 한 방향·한 진형으로 뭉쳐 온다 — 예고(파문·배너)를 보고, 자리를 잡고,
+ * 해소하는 짧은 arc 가 생긴다. 위치를 강제해야 이동이 다시 결정이 된다.
+ */
+export interface BeatDef {
+  readonly name: string
+  readonly type: FoeType
+  readonly count: number
+  readonly hpMul: number
+  /** 진형: 0 = 쐐기(한 방향 덩어리), 1 = 올가미(포위 링), 2 = 호송대(가로지르는 행렬) */
+  readonly form: number
+}
+
+export const BEATS: readonly BeatDef[] = [
+  { name: '잔불 조류', type: Foe.Mote, count: 55, hpMul: 0.8, form: 0 },
+  { name: '사냥대', type: Foe.Husk, count: 11, hpMul: 1.0, form: 0 },
+  { name: '호송대', type: Foe.Hex, count: 5, hpMul: 1.15, form: 2 },
+  { name: '올가미', type: Foe.Wisp, count: 22, hpMul: 0.9, form: 1 },
+  { name: '주시', type: Foe.Eye, count: 2, hpMul: 1.35, form: 0 },
+]
+
+/** 막별 등장 가능한 비트 (BEATS 인덱스). 뒤로 갈수록 흉포한 진형이 섞인다. */
+export const ACT_BEATS: readonly (readonly number[])[] = [
+  [0, 0, 1], // 1막: 조류 위주 — 배우는 시간의 파도
+  [0, 1, 3],
+  [1, 2, 3],
+  [1, 2, 3, 4],
+  [2, 3, 4, 0], // 5막의 조류는 물량 그 자체가 구경거리다
+]
+
 export const ACT_SECONDS = 180
 export const ACTS: readonly ActDef[] = [
   {

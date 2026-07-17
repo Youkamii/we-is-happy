@@ -139,6 +139,14 @@ function boot(): void {
     'text-shadow:0 0 40px rgba(255,180,80,.9);opacity:0;transition:opacity .5s;letter-spacing:.16em;'
   ui.appendChild(actBanner)
 
+  // 압박 비트 배너 — 막 배너보다 작게, "무엇이 오는지"만 짧게
+  const beatBanner = document.createElement('div')
+  beatBanner.style.cssText =
+    'position:absolute;left:0;right:0;top:35%;text-align:center;pointer-events:none;' +
+    'font:800 22px/1.4 ui-monospace,monospace;color:#ffb066;white-space:pre;' +
+    'text-shadow:0 0 24px rgba(255,140,60,.8);opacity:0;transition:opacity .3s;letter-spacing:.3em;'
+  ui.appendChild(beatBanner)
+
   const center = document.createElement('div')
   center.style.cssText =
     'position:absolute;inset:0;display:grid;place-content:center;text-align:center;' +
@@ -367,6 +375,13 @@ function boot(): void {
       actBanner.textContent = `${game.act + 1}막 · ${act.name}\n${act.sub}`
     } else {
       actBanner.style.opacity = '0'
+    }
+    // 비트는 막 배너와 겹치지 않게 그 아래에서 짧게
+    if (game.beatIntro > 0 && !result) {
+      beatBanner.style.opacity = String(Math.min(1, game.beatIntro / 0.6))
+      beatBanner.textContent = `— ${game.beatName} —`
+    } else {
+      beatBanner.style.opacity = '0'
     }
 
     // 결과 화면은 판이 끝난 순간 한 번만 조립한다. 예전엔 rAF 마다 innerHTML 을
