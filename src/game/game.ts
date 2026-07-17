@@ -444,10 +444,34 @@ export class Game implements FireCtx {
     const bx = foes.x[j]!
     const by = foes.y[j]!
     const hpFrac = foes.hp[j]! / boss.maxHp
+    const prevState = boss.state
     const entered = boss.tick(dt, this.rng, hpFrac)
 
-    // 상태에 **들어선 순간**에만 하는 일
+    // 상태 전이 순간에만 하는 일. **실행은 예고가 끝난 뒤에 온다** —
+    // 소환·수축의 몸통은 이전 상태가 끝나는 여기서 처리한다.
     if (entered !== null) {
+      if (prevState === BossState.Summon) {
+        // 잔챙이 살포 — 보스에게만 매달리면 둘러싸인다.
+        // 전엔 상태 **진입 즉시** 뿌려서, 예고 인장이 소환 뒤에 자라는 역순이었다.
+        const n = 6 + this.act * 3
+        for (let k = 0; k < n; k++) {
+          spawnRing(
+            foes, Foe.Husk, bx, by, 60, 190,
+            ACTS[this.act]!.hp * 0.6, this.randFn, WORLD_R,
+          )
+        }
+        shockwave(this.motes, bx, by, 220, 1.6, 0.6, 0.2, 0.6)
+        this.sfx('evolve')
+      } else if (prevState === BossState.Collapse) {
+        // 수축의 끝 — 중심에서 터진다("터진다"는 주석의 약속을 코드로).
+        // 링이 지나가기 전에 밖으로 나갔으면 0이다.
+        shockwave(this.motes, boss.ringX, boss.ringY, 170, 1.7, 0.45, 0.2, 0.6)
+        const pd = Math.hypot(this.player.x - boss.ringX, this.player.y - boss.ringY)
+        if (pd < 150 && this.player.hurt(26)) {
+          this.camera.shake(11, 9)
+          this.sfx('hurt')
+        }
+      }
       switch (entered) {
         case BossState.Aim: {
           // 조준을 확정한다. 이 시점의 플레이어 위치로 — 그래서 예고 중에
@@ -469,19 +493,10 @@ export class Game implements FireCtx {
           shockwave(this.motes, bx, by, 150, 1.4, 1.2, 0.4, 0.5)
           this.sfx('kill')
           break
-        case BossState.Summon: {
-          // 자기 주위에 잔챙이를 뿌린다 — 보스에게만 매달리면 둘러싸인다
-          const n = 6 + this.act * 3
-          for (let k = 0; k < n; k++) {
-            spawnRing(
-              foes, Foe.Husk, bx, by, 60, 190,
-              ACTS[this.act]!.hp * 0.6, this.randFn, WORLD_R,
-            )
-          }
-          shockwave(this.motes, bx, by, 220, 1.6, 0.6, 0.2, 0.6)
+        case BossState.Summon:
+          // 예고만 — 인장이 1.4초 차오른다. 잔챙이는 상태가 끝날 때(위) 나온다.
           this.sfx('evolve')
           break
-        }
         case BossState.Collapse:
           // 수축장: 지금 플레이어가 선 자리를 중심으로 링이 좁혀와 **중심에서 터진다**.
           // 링이 지나가기 전에 밖으로 나가야 산다.
@@ -512,18 +527,24 @@ export class Game implements FireCtx {
         break
       }
       case BossState.Collapse: {
-        // **링 안쪽이 위험하다. 밖이 안전하다.**
+        // **링 안쪽이 위험하다. 밖이 안전하다. 단, 유예 뒤부터.**
         //
-        // 예전엔 링 테두리(±34)에만 피해를 줬는데, 링이 70에서 멈추므로 **가만히 서
-        // 있으면(중심, pd=0) 절대 안 맞고** 도망치면 링에 걸렸다 — 의도와 정반대로
-        // 도주를 처벌하고 정지를 보상했다(적대 리뷰가 잡았다). 주석엔 "서 있으면 죽고
-        // 뛰면 산다"고 적혀 있었는데 코드는 반대였다.
+        // 두 번 틀린 자리다. ① 링 테두리(±34)에만 피해 — 링이 70에서 멈춰서 중심
+        // 정지가 절대 안전, 도주가 처벌이었다(의도와 정반대, 적대 리뷰가 잡았다).
+        // ② 안쪽 전체를 즉시 위험으로 — 링이 플레이어 발밑에서 시작하니 최고속 즉시
+        // 도주로도 탈출 1.16초, **완벽한 반응에 ~33 피해가 확정**됐다(계약 위반).
         //
-        // 지금은 링이 지나간 **안쪽 전체**가 위험하다. 좁혀오는 210px/s 보다 빨리
-        // (플레이어 238) 밖으로 나가면 산다 — 그게 "뛰면 산다"다.
+        // 지금: 유예(COLLAPSE_GRACE 1.5s) 동안은 조여들기만 한다 → 그 뒤 안쪽 전체가
+        // 아프다 → 끝에 중심이 터진다(전이 처리에서). 즉시 뛰면 0방, 서 있으면 3방+폭발.
+        //
+        // 수축 중엔 거의 제자리다 — speedScale(0.3)을 실제로 태운다. 이 케이스가
+        // 링만 처리하고 배율을 안 태워서, 0.3은 사장되고 보스가 전속으로 걸어왔었다.
+        const sc = boss.speedScale()
+        foes.vx[j]! *= sc
+        foes.vy[j]! *= sc
         boss.ringR = Math.max(0, boss.ringR - 210 * dt)
         const pd = Math.hypot(this.player.x - boss.ringX, this.player.y - boss.ringY)
-        if (pd < boss.ringR && this.player.hurt(11 * dt * 60)) {
+        if (boss.collapseArmed() && pd < boss.ringR && this.player.hurt(11)) {
           this.camera.shake(9, 10)
           this.sfx('hurt')
         }
@@ -554,8 +575,9 @@ export class Game implements FireCtx {
   /**
    * 막 끝 보스. 잔챙이만 15분이면 지루하다 — 막마다 "이번 고비"가 있어야 한다.
    * 보스는 같은 종족의 거대·고체력 개체다(별도 AI 를 만들면 hot loop 에 분기가 는다).
+   * 공개인 이유: 콘솔 디버그 API 이기도 하다 (docs 의 EMBERTIDE.game.spawnBoss()).
    */
-  private spawnBoss(): void {
+  spawnBoss(): void {
     const act = ACTS[this.act]!
     const hp = act.hp * 260 * (1 + this.act * 0.85)
     const i = spawnRing(
@@ -865,13 +887,15 @@ export class Game implements FireCtx {
       }
       case BossState.Collapse: {
         // 좁혀오는 링. 이게 안 보이면 그냥 알 수 없는 피해다.
+        // 유예 동안은 어둡게(경고), 물기 시작하면 밝게 — "지금부터 아프다"가 읽혀야 한다.
         const R = boss.ringR
         const seg = 56
+        const bite = boss.collapseArmed() ? 1 : 0.45
         for (let s = 0; s < seg; s++) {
           const a = (s / seg) * Math.PI * 2
           b.push(
             boss.ringX + Math.cos(a) * R, boss.ringY + Math.sin(a) * R,
-            13, a, ACCENT, 0.3, 0.16, 1, Shape.Orb,
+            13, a, ACCENT * bite, 0.3 * bite, 0.16 * bite, 1, Shape.Orb,
           )
         }
         break
@@ -1071,8 +1095,13 @@ export class Game implements FireCtx {
 
     // 보스는 체력이 4~40배인데 XP 는 잡졸과 같았다 — 최적 플레이가 "보스 무시"였다
     // (적대 리뷰가 잡았다). 잡은 값어치가 있어야 고비가 된다.
+    //
+    // **총량이 한 레벨의 55%다. 오브당이 아니다.** 8로 나누지 않았을 때 보스 하나가
+    // 한 레벨의 440%를 줬다 — reapCache 가 주석으로 반성한 그 착각(오브당 값 vs 총량)이
+    // 여기서 그대로 재발해 있었다. "잡을 값어치"는 주되 "한 레벨을 넘지 않는다"는
+    // 잔해의 원칙을 보스도 지킨다.
     if (isBossKill) {
-      const chunk = xpForLevel(this.player.level) * 0.55
+      const chunk = (xpForLevel(this.player.level) * 0.55) / 8
       for (let k = 0; k < 8; k++) {
         const a = this.rng.next() * Math.PI * 2
         const sp = 90 + this.rng.next() * 180

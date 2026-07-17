@@ -23,9 +23,9 @@ export const BossState = {
   Charge: 2,
   /** 기절 — 돌진 후 빈틈. 딜 기회. */
   Stagger: 3,
-  /** 소환 예고 */
+  /** 소환 — 인장이 차오르는 동안이 예고, 잔챙이는 상태가 끝날 때 나온다 */
   Summon: 4,
-  /** 수축장 예고 */
+  /** 수축장 — 유예(COLLAPSE_GRACE) 동안 조여들기만 하고, 그 뒤부터 안쪽이 아프다 */
   Collapse: 5,
 } as const
 export type BossStateType = (typeof BossState)[keyof typeof BossState]
@@ -39,6 +39,17 @@ const DURATION: Record<number, number> = {
   [BossState.Summon]: 1.4,
   [BossState.Collapse]: 2.6,
 }
+
+/**
+ * 수축장이 실제로 물기 시작하기까지의 유예(초).
+ *
+ * 링은 **플레이어 발밑**(반경 520, 조임 210px/s)에서 시작하므로, 최고속(238px/s)으로
+ * 즉시 도주해도 링 밖까지 520/(238+210) ≈ 1.16초가 걸린다. 유예가 그보다 짧으면
+ * 완벽한 반응에도 피해가 **확정**된다 — 위 계약 2번("이동만으로 피할 수 있다") 위반.
+ * 실제로 유예 0이던 시절 확정 피해가 ~33(체력 180의 18%)이었다.
+ * 1.5초 = 탈출 시간 + 반응 여유 0.34초.
+ */
+export const COLLAPSE_GRACE = 1.5
 
 export class Boss {
   /** Foes 풀에서의 인덱스. -1 이면 보스가 없다. */
@@ -155,5 +166,13 @@ export class Boss {
   telegraph(): number {
     const total = DURATION[this.state]!
     return 1 - Math.max(0, this.timer) / total
+  }
+
+  /** 수축장이 무는 중인가. 유예 동안은 조여들기만 한다 — 그때 나가면 무피해. */
+  collapseArmed(): boolean {
+    return (
+      this.state === BossState.Collapse &&
+      DURATION[BossState.Collapse]! - this.timer >= COLLAPSE_GRACE
+    )
   }
 }

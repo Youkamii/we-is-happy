@@ -265,14 +265,19 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
       ny *= inv
     }
 
+    // 몸 반경. 보스는 렌더가 3.4배라 **모든 판정**(지형·접촉)이 같은 반경을 써야 한다 —
+    // 접촉·무기 판정만 고치고 지형을 빼먹어서 보스 몸통이 벽에 ~65px 파묻혀 보였다.
+    const bodyR = i === bossIdx ? stat.radius * BOSS_SCALE : stat.radius
+
     // ── 지형: 길을 찾지 않고 갉아먹는다.
     // 2만 마리에 경로탐색은 불가능하고, 파괴로 풀면 오히려 전술이 생긴다.
-    if (terrain !== null && terrain.solidAt(nx, ny)) {
+    const inWall = terrain !== null && terrain.solidAt(nx, ny)
+    if (terrain !== null && inWall) {
       // 진행 방향 앞쪽 셀을 문다.
       // **적이 잔해를 터뜨려선 안 된다** — 그러면 내가 파러 가기도 전에 공짜로 열리고,
       // 위험/보상 선택이 그냥 시간 문제가 된다. 적은 잔해 셀을 못 부순다(hp 를 남긴다).
-      const gx = nx + dx * stat.radius
-      const gy = ny + dy * stat.radius
+      const gx = nx + dx * bodyR
+      const gy = ny + dy * bodyR
       const gcx = terrain.cellX(gx)
       const gcy = terrain.cellY(gy)
       if (terrain.inBounds(gcx, gcy) && terrain.cache[gcy * terrain.cols + gcx] === 1) {
@@ -282,21 +287,22 @@ export function updateFoes(ctx: FoeUpdateCtx, playerRadius: number): FoeUpdateRe
       } else {
         terrain.damageAt(gx, gy, stat.gnaw * dt, time)
       }
-      if (terrain.resolveCircle(nx, ny, stat.radius, scratch)) {
-        nx = scratch[0]!
-        ny = scratch[1]!
-        // 벽에 부딪힌 속도는 죽인다 — 안 그러면 벽을 타고 미끄러지며 떤다
-        vxs[i] = vx * 0.25
-        vys[i] = vy * 0.25
-      }
+    }
+    // 벽 밀어내기. 잔챙이는 중심이 벽 안일 때만 확인한다(2만 마리 hot path 라 solidAt 이
+    // 게이트). 보스는 항상 — 반경이 3.4배라 **중심이 빈 칸이어도 몸이 벽에 걸친다.**
+    if (terrain !== null && (inWall || i === bossIdx)
+      && terrain.resolveCircle(nx, ny, bodyR, scratch)) {
+      nx = scratch[0]!
+      ny = scratch[1]!
+      // 벽에 부딪힌 속도는 죽인다 — 안 그러면 벽을 타고 미끄러지며 떤다
+      vxs[i] = vx * 0.25
+      vys[i] = vy * 0.25
     }
 
     xs[i] = nx
     ys[i] = ny
 
-    // ── 플레이어 접촉
-    // 보스는 렌더가 3.4배라 판정도 3.4배여야 한다
-    const bodyR = i === bossIdx ? stat.radius * BOSS_SCALE : stat.radius
+    // ── 플레이어 접촉 (bodyR — 보스는 3.4배)
     const touch = bodyR + playerRadius
     if (distSq < touch * touch) {
       // 합산이 아니라 **최댓값**이다. 합치면 잔챙이 20마리가 Eye 보다 아프고,
