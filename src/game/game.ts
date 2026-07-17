@@ -190,7 +190,14 @@ export class Game implements FireCtx {
    */
   private nextVacuumRoll = 60
   /** 다음 압박 비트 시각. 균일한 스폰만으론 몇 분이면 루즈해진다 — acts.ts BEATS 참고. */
-  private nextBeatAt = 35
+  private nextBeatAt = 38
+  /**
+   * 위기의 자비 쿨다운 — 1막에서 체력 32% 아래로 싸우는 중이면 킬이 확정 회복을
+   * 떨군다(12초에 한 번). 확률(0.006)은 정확히 필요한 순간에 안 온다 — 실측:
+   * hp 16으로 10초를 버티고 280킬을 했는데 회복 0, 두 번째 물결에 사망.
+   * 무기 1~2개 시절의 위기는 실력이 아니라 뽑기라, 튜토리얼 막에서만 바닥을 깐다.
+   */
+  private nextMercy = 0
   /** 방금 발동한 비트 이름 — main 이 읽어 작은 배너로 띄운다 (연출 전용) */
   beatName = ''
   beatIntro = 0
@@ -202,6 +209,16 @@ export class Game implements FireCtx {
   private pactHeal = 1
   /** 레벨업 다시 뽑기 — 막마다 1회. 죽은 드래프트 구제용. */
   rerollLeft = 1
+  /**
+   * 심장박동 시계 — 박(beat) 단위 누적. 블랙홀의 맥이자 게임의 메트로놈:
+   * 무기 발사(8분음)·중력 펄스(마디 첫 박)·포식(8마디째)·BGM 이 전부 여기 물린다.
+   * BPM 이 막마다 올라도 **누적**이라 위상이 끊기지 않는다. rng 소비 0 — 결정론 안전.
+   */
+  beatClock = 0
+  /** 이번 스텝이 8분음 경계인가 — 무기 발사 창 (FireCtx, weapons.tickWeapon 이 읽는다) */
+  beatFire = false
+  private feedingNow = false
+  private feedWarned = false
   /**
    * 이번 프레임에 낼 소리. Game 이 Audio 를 직접 들면 시뮬레이션이 브라우저에
    * 묶여서 테스트가 안 돈다 — 큐에 쌓고 main 이 소비한다.
@@ -229,12 +246,53 @@ export class Game implements FireCtx {
     return this.holeR() + 90
   }
 
+  /** 현재 막의 심장박동 BPM (acts 데이터) */
+  bpm(): number {
+    return ACTS[this.act]!.bpm
+  }
+
   /**
-   * 이번 스텝의 중력 배율. R3(심장박동)가 마디 펄스와 포식으로 올릴 자리 —
-   * 지금은 상시 1이다. 여기 하나만 바꾸면 플레이어·적·드랍이 함께 숨쉰다.
+   * 포식 — 8마디마다 한 마디(4박) 동안 블랙홀이 크게 들이쉰다. 중력이 5.2배로
+   * 치솟아 지평선 3배 반경의 적·XP 가 우수수 빨려든다. bar 16(1막 ~44초) 전엔
+   * 없다 — 첫 수업(15초 계약)과 조작 학습 구간을 침범하지 않는다.
+   */
+  feeding(): boolean {
+    const bar = Math.floor(this.beatClock / 4)
+    return bar >= 16 && bar % 8 === 7
+  }
+
+  /** 포식 예고 — 직전 마디의 후반 2박. 광자 고리가 조이고 저음이 운다. */
+  feedWarn(): boolean {
+    const bar = Math.floor(this.beatClock / 4)
+    return bar >= 15 && bar % 8 === 6 && this.beatClock % 4 >= 2
+  }
+
+  /**
+   * 이번 스텝의 중력 배율 — 심장박동이 곧 중력이다.
+   * 마디 첫 박(0.5박)마다 "쿵" 하고 조이고(2.6배), 포식 마디는 5.2배.
+   * 여기 하나로 플레이어·적·드랍이 함께 숨쉰다.
    */
   private holeSurge(): number {
+    if (this.feeding()) return 5.2
+    if (this.beatClock % 4 < 0.5) return 2.6
     return 1
+  }
+
+  /** 심장박동 상태 전이 — 포식 예고·시작의 소리와 배너 (1회성 이벤트 발행) */
+  private tickHeartbeat(): void {
+    if (this.feedWarn() && !this.feedWarned) {
+      this.feedWarned = true
+      this.sfx('boom')
+      this.beatName = '포식'
+      this.beatIntro = 2.0
+    }
+    const f = this.feeding()
+    if (f && !this.feedingNow) {
+      this.sfx('boom')
+      this.camera.shake(8, 6)
+    }
+    this.feedingNow = f
+    if (!f && !this.feedWarn()) this.feedWarned = false
   }
 
   start(seed: number): void {
@@ -256,7 +314,8 @@ export class Game implements FireCtx {
     this.pendingLevels = 0
     this.vacuumOut = 0
     this.nextVacuumRoll = 60
-    this.nextBeatAt = 35
+    this.nextBeatAt = 38
+    this.nextMercy = 0
     this.beatName = ''
     this.beatIntro = 0
     this.pactXp = 1
@@ -265,6 +324,10 @@ export class Game implements FireCtx {
     this.pactFoeSpeed = 1
     this.pactHeal = 1
     this.rerollLeft = 1
+    this.beatClock = 0
+    this.beatFire = false
+    this.feedingNow = false
+    this.feedWarned = false
     this.fxLumPrev = 0
     this.flashPrev = 0
     this.fxAcc = 0
@@ -382,6 +445,15 @@ export class Game implements FireCtx {
   private step(input: Input, dt: number): void {
     this.elapsed += dt
 
+    // ── 심장박동. 16분음 경계 검출이 무기 발사 창(beatFire)이 된다.
+    // 8분음으로 시작했더니 초반 무기 1개의 "지속 압력"이 "펄스+공백"이 되어
+    // 공백마다 접촉을 허용했다(earlygame 3종 사망). 16분음이면 공백이 절반인데
+    // 정렬감은 산다 — 리듬의 몸통은 어차피 킥과 마디 중력 펄스다.
+    const prevClock = this.beatClock
+    this.beatClock += dt * (ACTS[this.act]!.bpm / 60)
+    this.beatFire = Math.floor(this.beatClock * 4) !== Math.floor(prevClock * 4)
+    this.tickHeartbeat()
+
     this.player.update(input.move, dt, WORLD_R)
     // 지형은 플레이어를 막는다 (적은 갉아먹고 지나간다)
     if (this.terrain.resolveCircle(this.player.x, this.player.y, this.player.radius, this.hit2)) {
@@ -463,7 +535,10 @@ export class Game implements FireCtx {
         // 잡았다) — 반동은 빠져나가려는 움직임을 살리는 장치지, 제자리 요새의
         // 보호막이 아니다.
         if (Math.hypot(this.player.vx, this.player.vy) > 40) {
-          this.pushFoes(this.player.x, this.player.y, 120, 340)
+          // 340→390, 120→132: 심장박동 양자화로 발사 사이 공백이 그리드에 물리자
+          // 초반 무기 1개 구간의 포위 이탈 여유가 줄었다(불씨 시드 48.9s 사망).
+          // 반동은 그 복권을 해소하려고 도입한 보편 장치다 — 한 눈금 더 준다.
+          this.pushFoes(this.player.x, this.player.y, 132, 390)
         }
         this.camera.shake(9, 12)
         this.sfx('hurt')
@@ -818,8 +893,11 @@ export class Game implements FireCtx {
     const beat = BEATS[table[this.rng.int(table.length)]!]!
     const bearing = this.rng.next() * Math.PI * 2
     const hpScale = ACTS[this.act]!.hp * (1 + actProgressAt(this.elapsed) * 0.55) * beat.hpMul
+    // 1막 비트는 72%만 — "1막은 배우는 시간". 무기 1~2개 시점에 진형 전량과
+    // 배경 스폰이 포개지면(실측 근접 260마리) 배움이 아니라 복권이 된다.
+    const count = this.act === 0 ? Math.round(beat.count * 0.72) : beat.count
     spawnFormation(
-      this.foes, beat.type, beat.form, beat.count,
+      this.foes, beat.type, beat.form, count,
       this.player.x, this.player.y, bearing, hpScale, this.randFn, WORLD_R, this.holeGuard(),
     )
     // 예고: 오는 방향에 파문 — "어디서"가 보여야 자리 잡기가 결정이 된다
@@ -1390,8 +1468,18 @@ export class Game implements FireCtx {
         affix !== Affix.None ? stat.xp * 2.5 : stat.xp, Drop.Xp,
       )
     }
-    // 회복은 드물어야 긴장이 산다 (탐식 계약은 이걸 반으로 줄인다)
-    if (this.rng.next() < 0.006 * this.pactHeal) this.drops.spawn(x, y, 0, 0, 22, Drop.Heal)
+    // 회복은 드물어야 긴장이 산다 (탐식 계약은 이걸 반으로 줄인다).
+    // 1막만 1.8배 — 무기 1~2개 시절엔 회복 수단 자체가 뽑기라 바닥이 얇다.
+    const healP = 0.006 * (this.act === 0 ? 1.8 : 1) * this.pactHeal
+    if (this.rng.next() < healP) this.drops.spawn(x, y, 0, 0, 22, Drop.Heal)
+    // 위기의 자비 — 확률은 정확히 필요한 순간에 안 온다 (필드 주석). rng 무소비.
+    if (
+      this.act === 0 && this.elapsed >= this.nextMercy &&
+      this.player.hp < this.player.stats.maxHp * 0.32
+    ) {
+      this.nextMercy = this.elapsed + 12
+      this.drops.spawn(x, y, 0, 0, 26, Drop.Heal)
+    }
 
     foes.kill(j)
     this.player.kills++
@@ -1601,6 +1689,13 @@ export class Game implements FireCtx {
     // 블랙홀은 배경 패스(cosmos)가 그린다 — 무블렌드 쓰기라 어둡게 할 수 있는
     // 유일한 층이고, 렌즈 왜곡·원반·광자 고리까지 셰이더 한 방이다.
     renderer.cosmos.holeR = this.holeR()
+    // 심장박동을 광자 고리·원반에 싣는다. 박마다 얕게, 마디 첫 박에 깊게 —
+    // 화면이 소리 없이도 박자를 가르친다 (무기 발사가 이 박자에 물려 있다).
+    const beatEnv = Math.exp(-(this.beatClock % 1) * 4.5)
+    const barPos = this.beatClock % 4
+    const barEnv = barPos < 1 ? Math.exp(-barPos * 3) : 0
+    renderer.cosmos.beat = beatEnv * 0.35 + barEnv * 0.65
+    renderer.cosmos.feed = this.feeding() ? 1 : this.feedWarn() ? 0.45 : 0
 
     renderer.begin(view, t)
 
@@ -1870,7 +1965,8 @@ export class Game implements FireCtx {
       const hop = Math.abs(p.vx) + Math.abs(p.vy) > 20 ? Math.abs(Math.sin(t * 11)) * 5 : 0
       renderer.shadows.push(p.x, p.y - 13, 30, 0, 0, 0, 0.05, 0.5, Shape.Orb)
       const py = p.y + hop
-      b.push(p.x, py, 42, t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
+      // 광륜이 심장박동에 맞춰 살짝 부푼다 — 내 몸이 메트로놈이다
+      b.push(p.x, py, 42 * (1 + 0.12 * barEnv), t * 0.5, 0.5 * inv, 0.85 * inv, 1.7 * inv, 1, Shape.Halo)
       b.push(p.x, py, 26, -t * 1.4, PLAYER_BASE * inv, PLAYER_BASE * 0.85 * inv, PLAYER_BASE * 1.2 * inv, 1, Shape.Seed)
       b.push(p.x, py, 15, t * 3.1, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, PLAYER_BASE * 1.3 * inv, 1, Shape.Nova)
 

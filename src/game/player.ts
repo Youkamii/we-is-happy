@@ -56,7 +56,10 @@ export function baseStats(): Stats {
     projSpeed: 1,
     pierce: 0,
     multi: 0,
-    magnet: 95,
+    // 95 → 108: 심장박동 양자화가 초반 킬·픽업을 그리드에 물리며 "첫 수업 15초"
+    // 계약이 15.3s 로 칼끝에 걸렸다(신문 시드). 자석은 성장축이 아니라 기본값이라
+    // "주우러 가는 이동 동기"를 해치지 않는 선에서 픽업 반응만 당긴다.
+    magnet: 108,
     regen: 0,
     iframe: 0.4,
     greed: 1,
@@ -146,9 +149,10 @@ export function xpForLevel(level: number): number {
    * 튜토리얼이 없는 게임이라 **첫 레벨업 화면이 곧 첫 수업**이다 — "고르면 강해진다"를
    * 거기서 배운다. 실측으로 첫 레벨업이 13~17초였는데, 그동안 플레이어는 아무것도
    * 안 배우고 도망만 친다. 1막 밀도를 낮춘 뒤라 킬이 느려서 더 밀렸다.
-   * 3 XP = Mote 3마리 = 대략 4~6초.
+   * 심장박동 양자화(16분음)가 첫 발사를 그리드에 물리며 초반 킬이 1~2마리분
+   * 늦어졌다 — 첫 세 레벨을 한 킬씩 당겨 "첫 수업 15초" 계약을 지킨다(3/5/7 → 2/4/6).
    */
-  if (level <= 3) return 1 + level * 2
+  if (level <= 3) return level * 2
   return Math.floor(7 * Math.pow(1.115, level - 1) + level * 2)
 }
 

@@ -24,6 +24,11 @@ export interface ActDef {
   readonly hp: number
   /** 막 끝 보스 */
   readonly boss: FoeType
+  /**
+   * 심장박동 BPM — 블랙홀의 맥. 무기 발사(8분음 양자화)·중력 펄스(마디 첫 박)·
+   * 포식(8마디째)·BGM 이 전부 이 박자 하나에 물린다. 막이 오를수록 빨라진다.
+   */
+  readonly bpm: number
 }
 
 /**
@@ -143,7 +148,7 @@ export const ACTS: readonly ActDef[] = [
     name: '잔불', sub: '죽은 별의 심장이 뛴다',
     tintA: [0.30, 0.13, 0.55], tintB: [0.05, 0.28, 0.45],
     weights: [{ type: Foe.Mote, w: 1 }],
-    rate: 0.7, hp: 1, boss: Foe.Eye,
+    rate: 0.7, hp: 1, boss: Foe.Eye, bpm: 88,
   },
   {
     name: '조수', sub: '지평선이 숨을 들이쉰다',
@@ -151,7 +156,7 @@ export const ACTS: readonly ActDef[] = [
     weights: [
       { type: Foe.Mote, w: 0.62 }, { type: Foe.Husk, w: 0.26 }, { type: Foe.Wisp, w: 0.12 },
     ],
-    rate: 1.6, hp: 2.8, boss: Foe.Hex,
+    rate: 1.6, hp: 2.8, boss: Foe.Hex, bpm: 100,
   },
   {
     name: '균열', sub: '원반이 타오르기 시작한다',
@@ -160,7 +165,7 @@ export const ACTS: readonly ActDef[] = [
       { type: Foe.Mote, w: 0.44 }, { type: Foe.Husk, w: 0.24 },
       { type: Foe.Wisp, w: 0.18 }, { type: Foe.Hex, w: 0.14 },
     ],
-    rate: 2.6, hp: 7, boss: Foe.Eye,
+    rate: 2.6, hp: 7, boss: Foe.Eye, bpm: 112,
   },
   {
     name: '심연', sub: '빛도 되돌아오지 못한다',
@@ -169,7 +174,7 @@ export const ACTS: readonly ActDef[] = [
       { type: Foe.Mote, w: 0.34 }, { type: Foe.Husk, w: 0.24 },
       { type: Foe.Wisp, w: 0.18 }, { type: Foe.Hex, w: 0.2 }, { type: Foe.Eye, w: 0.04 },
     ],
-    rate: 3.6, hp: 17, boss: Foe.Hex,
+    rate: 3.6, hp: 17, boss: Foe.Hex, bpm: 124,
   },
   {
     // 마지막 막은 잔챙이가 없다. 4막과 종족 구성이 같으면 마지막 6분이 한 장면이다
@@ -188,7 +193,7 @@ export const ACTS: readonly ActDef[] = [
     // 이 표로 미세조정하지 마라. 지키는 계약은 두 개다 —
     // ① 초반 사망 0 (최단 사망 461s+, earlygame.test 가 90s 하한을 잠근다)
     // ② 완주는 드물다 (봇 기준 0~2/6, 사망은 3~5막에 분포하는 "아깝게 실패")
-    rate: 4.6, hp: 32, boss: Foe.Eye,
+    rate: 4.6, hp: 32, boss: Foe.Eye, bpm: 136,
   },
 ]
 

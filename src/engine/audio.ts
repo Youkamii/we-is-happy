@@ -12,6 +12,7 @@ const MAX_VOICES = 24
 export type SfxName =
   | 'shoot' | 'hit' | 'kill' | 'bigKill' | 'hurt' | 'pickup'
   | 'levelup' | 'evolve' | 'nova' | 'bolt' | 'blade' | 'death' | 'win'
+  | 'boom'
 
 interface Throttle {
   /** 이 소리를 다시 낼 수 있는 가장 이른 시각 (ctx.currentTime 기준) */
@@ -236,6 +237,13 @@ export class Audio {
         this.noise(t, 0.11, 0.1, 'bandpass', 4200, 1400, sfx)
         break
 
+      case 'boom':
+        // 포식 예고·시작 — 블랙홀이 숨을 들이쉬는 초저음. 배로 느껴져야 한다.
+        if (!this.canPlay('boom', 0.5)) return
+        this.tone('sine', 72, 26, t, 0.65, 0.5, sfx)
+        this.noise(t, 0.5, 0.22, 'lowpass', 300, 40, sfx)
+        break
+
       case 'death':
         this.tone('sawtooth', 160, 28, t, 1.4, 0.3, sfx)
         this.noise(t, 1.1, 0.28, 'lowpass', 1200, 60, sfx)
@@ -249,28 +257,53 @@ export class Audio {
     }
   }
 
+  /** 심장박동 동기 모드에서 마지막으로 예약한 16분 인덱스 */
+  private lastIdx16 = -1
+
   /**
    * 적응형 BGM. 압박이 커질수록 레이어가 쌓인다.
-   * 16분 그리드로 한 스텝씩 예약하는 단순한 시퀀서다.
+   *
+   * **심장박동 동기**: beatClock(박 단위, 게임의 단일 박자원)을 받으면 16분 그리드를
+   * 거기서 유도한다 — 킥이 곧 게임의 박이고, 마디 첫 박(s%16==0)은 강킥이다.
+   * 무기 발사(8분음 양자화)·중력 펄스가 같은 시계에 물려 있으므로, 여기가 어긋나면
+   * 리듬게임이 아니라 소음이 된다. 시뮬이 멈추면(일시정지·레벨업) 음악도 멈춘다.
+   * beatClock 없이 부르면(타이틀·정지 화면) 자체 타이머로 돈다.
    */
-  updateMusic(dt: number): void {
+  updateMusic(dt: number, beatClock = -1, bpm = 116): void {
     const ctx = this.ctx
     const bus = this.musicGain
     if (!ctx || !bus || this.muted) return
 
-    const bpm = 104 + this.intensity * 34
-    const stepDur = 60 / bpm / 4
+    if (beatClock >= 0) {
+      const idx = Math.floor(beatClock * 4)
+      if (idx <= this.lastIdx16) return
+      // 탭 복귀 등으로 크게 밀렸으면 따라잡지 않는다 — 몰아 연주하면 소음이다
+      if (idx - this.lastIdx16 > 8) this.lastIdx16 = idx - 1
+      const t = ctx.currentTime + 0.02
+      while (this.lastIdx16 < idx) {
+        this.lastIdx16++
+        this.scheduleStep(this.lastIdx16, t, bpm)
+      }
+      return
+    }
+
+    const selfBpm = 104 + this.intensity * 34
+    const stepDur = 60 / selfBpm / 4
     this.musicTimer -= dt
     if (this.musicTimer > 0) return
     this.musicTimer += stepDur
+    this.scheduleStep(this.musicStep++, ctx.currentTime + 0.02, selfBpm)
+  }
 
-    const t = ctx.currentTime + 0.02
-    const s = this.musicStep++
+  /** 시퀀서 16분 스텝 하나 예약. s 가 그리드 위치(마디 = 16)를 정한다. */
+  private scheduleStep(s: number, t: number, _bpm: number): void {
+    const bus = this.musicGain!
     const inten = this.intensity
 
-    // 킥 — 항상
+    // 킥 — 박마다. 마디 첫 박은 블랙홀의 강박: 심장박동의 몸통이다.
     if (s % 4 === 0) {
-      this.tone('sine', 150, 42, t, 0.16, 0.5, bus)
+      const strong = s % 16 === 0
+      this.tone('sine', strong ? 168 : 150, strong ? 36 : 42, t, strong ? 0.2 : 0.15, strong ? 0.62 : 0.42, bus)
     }
     // 베이스 — 처음부터
     if (s % 2 === 0) {

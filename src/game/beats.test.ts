@@ -11,7 +11,7 @@ function mockInput(x: number, y: number): Input {
 }
 
 describe('압박 비트', () => {
-  it('35초 언저리에 첫 비트가 실제로 밀려온다', () => {
+  it('38초 언저리에 첫 비트가 실제로 밀려온다', () => {
     const g = new Game()
     g.start(31)
     // 배경 스폰을 꺼 비트 진형만 잰다
@@ -19,7 +19,7 @@ describe('압박 비트', () => {
     const input = mockInput(0, 0)
     let fired = -1
     let guard = 0
-    while (fired < 0 && guard++ < 45 * 60) {
+    while (fired < 0 && guard++ < 48 * 60) {
       if (g.phase === Phase.LevelUp) {
         g.choose(g.pendingChoices[0]!)
         continue
@@ -28,11 +28,13 @@ describe('압박 비트', () => {
       g.update(input, 1 / 60)
       if (g.beatIntro > 0) fired = g.elapsed
     }
-    expect(fired, '비트 발동 시각').toBeGreaterThanOrEqual(34.9)
-    expect(fired).toBeLessThanOrEqual(36)
+    // 35 → 38: 1막 첫 비트를 늦췄다 — 무기 1~2개 시점에 진형과 배경 스폰이
+    // 포개져 배움이 복권이 됐다(earlygame 45초대 사망 클러스터).
+    expect(fired, '비트 발동 시각').toBeGreaterThanOrEqual(37.9)
+    expect(fired).toBeLessThanOrEqual(39)
     expect(g.beatName).not.toBe('')
-    // 1막 비트는 조류(55) 아니면 사냥대(11) — 진형이 통째로 스폰돼야 한다
-    expect(g.foes.count, '비트 진형 스폰 수').toBeGreaterThanOrEqual(11)
+    // 1막 비트는 조류 아니면 사냥대 — 진형이 통째로(1막 배율 72% 반영) 스폰돼야 한다
+    expect(g.foes.count, '비트 진형 스폰 수').toBeGreaterThanOrEqual(8)
   })
 
   it('보스가 살아 있는 동안엔 비트가 안 온다 (고비 둘을 포개지 않는다)', () => {

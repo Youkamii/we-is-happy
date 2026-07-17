@@ -39,6 +39,8 @@ export interface FireCtx {
   pushFoes(x: number, y: number, radius: number, force: number): void
   /** 지형을 부순다 (혜성 전용) */
   breakTerrain(x: number, y: number, radius: number, power: number): void
+  /** 이번 스텝이 16분음 경계인가 — 심장박동 발사 창. 발사형 무기는 여기 맞춰 쏜다. */
+  readonly beatFire: boolean
 }
 
 /** 지속 효과체 종류. game.ts 의 Fields 풀이 이 값으로 거동을 가른다. */
@@ -288,20 +290,37 @@ export function tickWeapon(slot: WeaponSlot, ctx: FireCtx, dt: number): void {
 
   slot.timer -= dt
   if (slot.timer > 0) return
-  slot.timer = def.cooldown * s.cooldown
-
-  switch (def.id) {
-    case W.Ember: fireEmber(slot, ctx); break
-    case W.Arc: fireArc(slot, ctx); break
-    case W.Bolt: fireBolt(slot, ctx); break
-    case W.Nova: fireNova(slot, ctx); break
-    case W.Thorn: fireThorn(slot, ctx); break
-    case W.Well: fireWell(slot, ctx); break
-    case W.Beam: fireBeam(slot, ctx); break
-    case W.Comet: fireComet(slot, ctx); break
-    case W.Sigil: fireSigil(slot, ctx); break
-    case W.Still: fireStill(slot, ctx); break
+  /**
+   * 심장박동 양자화 — 쿨다운이 끝나도 다음 16분음 경계까지 기다렸다가 쏜다.
+   * 무기 여섯이 제각각 흩뿌리던 화면이 블랙홀의 박자 그리드에 물린다.
+   * (8분음은 발사 공백이 길어 초반 접촉을 허용했다 — game.ts step 주석)
+   *
+   * DPS 는 보존된다: 기다린 시간이 timer 에 음수로 남고, 발사 시 += cd 라
+   * 다음 발사가 그만큼 앞당겨진다 — 양자화는 위상만 옮긴다. 쿨다운이 16분음보다
+   * 짧아진 무기(공속 스택)는 한 창에 밀린 만큼 연발한다(상한 4 — 폭주 안전판).
+   */
+  if (!ctx.beatFire) return
+  const cd = def.cooldown * s.cooldown
+  let volleys = 0
+  while (slot.timer <= 0 && volleys < 4) {
+    slot.timer += cd
+    volleys++
+    switch (def.id) {
+      case W.Ember: fireEmber(slot, ctx); break
+      case W.Arc: fireArc(slot, ctx); break
+      case W.Bolt: fireBolt(slot, ctx); break
+      case W.Nova: fireNova(slot, ctx); break
+      case W.Thorn: fireThorn(slot, ctx); break
+      case W.Well: fireWell(slot, ctx); break
+      case W.Beam: fireBeam(slot, ctx); break
+      case W.Comet: fireComet(slot, ctx); break
+      case W.Sigil: fireSigil(slot, ctx); break
+      case W.Still: fireStill(slot, ctx); break
+    }
   }
+  // 상한(4)에 잘린 적자는 탕감한다 — 안 그러면 극단 공속에서 timer 가 음수로
+  // 발산하며 영원히 4연발 상태에 갇힌다. 8분음당 4볼리가 곧 발사율 상한이다.
+  if (slot.timer < 0) slot.timer = 0
 }
 
 // ── 중력정 / 특이점 ────────────────────────────────────────────────────
@@ -637,7 +656,9 @@ function drawBolt(
 function tickOrbit(slot: WeaponSlot, ctx: FireCtx, dt: number): void {
   const p = ctx.player
   const s = p.stats
-  const count = 2 + Math.floor(slot.level * 0.75) + (slot.evolved ? 3 : 0)
+  // 2+ → 3+: 위성은 "접근한 적만" 때리는 수동 무기라 초반 킬이 구조적으로 느리다
+  // (실측 15초 킬 4 — 첫 수업 17초로 계약 위반). 시작 구슬 하나가 그 하한을 세운다.
+  const count = 3 + Math.floor(slot.level * 0.75) + (slot.evolved ? 3 : 0)
   const dist = (86 + slot.level * 5) * s.area
   const size = (13 + slot.level * 1.6) * s.area * (slot.evolved ? 2.1 : 1)
   const spin = (2.1 + slot.level * 0.12) * (slot.evolved ? 1.5 : 1)

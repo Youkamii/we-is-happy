@@ -341,7 +341,8 @@ function boot(): void {
     }
     // 음악 압박도 = 런 진행도. 마지막 1분이 다른 곡처럼 들려야 한다.
     audio.intensity = game.phase === Phase.Playing ? Math.min(1, game.elapsed / RUN_SECONDS) : 0
-    audio.updateMusic(dt)
+    // 심장박동 동기 — BGM 킥이 곧 게임의 박자다 (무기 발사·중력 펄스와 같은 시계)
+    audio.updateMusic(dt, game.beatClock, game.bpm())
 
     const p = game.player
     const hpPct = Math.round((p.hp / p.stats.maxHp) * 100)

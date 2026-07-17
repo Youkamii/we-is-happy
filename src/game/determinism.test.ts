@@ -160,7 +160,10 @@ describe('결정론', () => {
     const game = new Game()
     game.start(5)
     const input = mockInput(0.5, 0.5)
-    for (let i = 0; i < 600; i++) {
+    // 600(10초)이던 것을 900(15초)으로 — 심장박동 양자화가 첫 발사를 최대 8분음
+    // 미루면서 칼끝에 있던 이 시드의 첫 레벨업이 10초 밖으로 밀렸다.
+    // 재는 건 "시뮬이 진짜 돈다"는 새니티지 초반 속도가 아니다 (그건 earlygame 몫).
+    for (let i = 0; i < 900; i++) {
       if (game.phase === Phase.LevelUp) game.choose(game.pendingChoices[0]!)
       if (game.phase !== Phase.Playing) break
       game.update(input, 1 / 60)

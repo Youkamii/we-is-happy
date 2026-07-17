@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
-import { Game } from './game'
+import { Game, Phase } from './game'
 import { Drop, Foe } from './pools'
 
 function mockInput(x: number, y: number): Input {
@@ -50,7 +50,15 @@ describe('블랙홀', () => {
     // 1막은 막 램프로 흐름이 가장 약하니, 중력이 충분한 안쪽 궤도에서 잰다.
     const outside = g.drops.spawn(hr * 1.6, 0, 0, 0, 5, Drop.Xp)
     const d0 = Math.hypot(g.drops.x[outside]!, g.drops.y[outside]!)
-    for (let s = 0; s < 90; s++) g.update(mockInput(0, 0), 1 / 60)
+    for (let s = 0; s < 90; s++) {
+      // 레벨업 브레이크에 걸리면 시뮬이 멈춰 표류를 못 잰다 (양자화로 킬 타이밍이
+      // 옮겨지자 이 시드에서 실제로 걸렸다) — 자동으로 고르고 계속 간다.
+      if (g.phase === Phase.LevelUp) {
+        g.choose(g.pendingChoices[0]!)
+        continue
+      }
+      g.update(mockInput(0, 0), 1 / 60)
+    }
     expect(g.drops.alive[inside], '지평선 안 XP 는 삼켜졌다').toBe(0)
     expect(g.drops.alive[outside], '밖의 XP 는 아직 산다').toBe(1)
     const d1 = Math.hypot(g.drops.x[outside]!, g.drops.y[outside]!)
