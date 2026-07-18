@@ -12,6 +12,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+import { LY, STAR_MAP } from '../game/starmap'
 import { BodyKind, type Voyage } from '../game/voyage'
 
 const MAX_INST = 2600
@@ -125,6 +126,10 @@ export class Scene3D {
   private readonly rivalGlow: THREE.Sprite[] = []
 
   private readonly ecliptic: THREE.PolarGridHelper
+  /** 랜드마크 — 실지도 항성계는 아무리 멀어도 밝은 별점으로 보인다 (항법의 잣대) */
+  private readonly landmarks: THREE.Sprite[] = []
+  private readonly labelBox: HTMLDivElement
+  private readonly labels: HTMLDivElement[] = []
   /** 축 표시기 — three(X,Y,Z)=(빨,초,파) = 게임 (x, z↑, y). X 키 토글 */
   readonly axes: THREE.AxesHelper
   private readonly m4 = new THREE.Matrix4()
@@ -260,6 +265,30 @@ export class Scene3D {
       this.scene.add(sp)
     }
 
+    // 랜드마크 별점 + 이름 라벨
+    for (let i = 0; i < STAR_MAP.length; i++) {
+      const sys = STAR_MAP[i]!
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+      }))
+      sp.material.color.setRGB(
+        Math.min(1, sys.cr * 0.8), Math.min(1, sys.cg * 0.8), Math.min(1, sys.cb * 0.8),
+      )
+      this.landmarks.push(sp)
+      this.overlay.add(sp)
+    }
+    this.labelBox = document.createElement('div')
+    this.labelBox.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;'
+    ;(canvas.parentElement ?? document.body).appendChild(this.labelBox)
+    for (let i = 0; i < 5; i++) {
+      const d = document.createElement('div')
+      d.style.cssText =
+        'position:absolute;font:600 11px/1.4 ui-monospace,monospace;color:#c9a35f;' +
+        'text-shadow:0 0 6px rgba(0,0,0,.9);white-space:nowrap;display:none;'
+      this.labels.push(d)
+      this.labelBox.appendChild(d)
+    }
+
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
     const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.7, 0.82)
@@ -335,6 +364,42 @@ export class Scene3D {
     this.ecliptic.scale.setScalar(dist * 3.2)
     this.axes.position.set(px, py, pz)
     this.axes.scale.setScalar(dist * 0.22)
+
+    // 랜드마크 — 실지도 항성계를 하늘의 별점으로. 가까운 넷엔 이름·광년 라벨
+    const w0 = this.renderer.domElement.clientWidth
+    const h0 = Math.max(1, this.renderer.domElement.clientHeight)
+    let labelN = 0
+    const skyR = dist * 30
+    for (let i = 0; i < STAR_MAP.length; i++) {
+      const sys = STAR_MAP[i]!
+      const sp = this.landmarks[i]!
+      const dx = sys.x - px
+      const dy = sys.z - py
+      const dz = sys.y - pz
+      const d3 = Math.hypot(dx, dy, dz) || 1
+      if (d3 < dist * 12) {
+        sp.visible = false // 실제 지오메트리가 보이는 거리 — 별점은 물러난다
+        continue
+      }
+      sp.visible = true
+      sp.position.set(px + (dx / d3) * skyR, py + (dy / d3) * skyR, pz + (dz / d3) * skyR)
+      const imp = sys.kind === 'core' ? 2.6 : sys.kind === 'garden' ? 1.7 : 1
+      sp.scale.setScalar(skyR * 0.014 * imp)
+      sp.material.opacity = 0.85
+      // 라벨 — 화면 안에 있고 가까운 순 다섯
+      if (labelN < 5) {
+        this.v3.copy(sp.position).project(this.camera)
+        if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
+          const lb = this.labels[labelN++]!
+          lb.style.display = 'block'
+          lb.style.left = `${((this.v3.x + 1) / 2) * w0 + 8}px`
+          lb.style.top = `${((1 - this.v3.y) / 2) * h0 - 6}px`
+          const lyd = d3 / LY
+          lb.textContent = `${sys.name} · ${lyd >= 1 ? `${lyd.toFixed(1)}광년` : `${Math.round(d3 / 1000)}k`}`
+        }
+      }
+    }
+    for (let i = labelN; i < 5; i++) this.labels[i]!.style.display = 'none'
 
     // 조명 — 가장 가까운 태양이 태양이다
     let sunB: { x: number; y: number; z: number } | null = null
