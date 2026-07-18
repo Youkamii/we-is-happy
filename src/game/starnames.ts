@@ -216,6 +216,39 @@ export function realName(cat: RealCategory, id: number): RealName {
   return { name: pool[h % pool.length]!, log: logs[(h >>> 8) % logs.length]! }
 }
 
+/**
+ * 카탈로그 명명 — 잡천체는 유명 이름을 돌려쓰지 않는다 (중복 도배 방지).
+ * 실제 천문 명명법을 따른다: 소행성 임시명(1987 QT44), HD 항성 목록,
+ * WISE 갈색왜성, OGLE 떠돌이 행성, nI/ 성간 방문자. 해시라 사실상 유일하다.
+ */
+const DESIG = 'ABCDEFGHJKLMNPQRSTUVWXYZ' // 실제 규칙처럼 I·O 제외
+export type CatalogCategory = 'minor' | 'star' | 'brown' | 'rogue' | 'icomet'
+
+export function catalogName(cat: CatalogCategory, id: number): RealName {
+  const h = id >>> 0
+  const l1 = DESIG[(h >>> 8) % 24]!
+  const l2 = DESIG[(h >>> 13) % 24]!
+  const logOf = (k: RealCategory): string => {
+    const logs = CAT_LOGS[k]
+    return logs[(h >>> 6) % logs.length]!
+  }
+  switch (cat) {
+    case 'minor':
+      return { name: `${1950 + ((h >>> 3) % 76)} ${l1}${l2}${h % 100}`, log: logOf('asteroid') }
+    case 'star':
+      return { name: `HD ${10000 + (h % 320000)}`, log: logOf('sunBright') }
+    case 'brown':
+      return {
+        name: `WISE J${1000 + (h % 1400)}${(h & 1) === 1 ? '−' : '+'}${100 + ((h >>> 4) % 900)}`,
+        log: logOf('brown'),
+      }
+    case 'rogue':
+      return { name: `OGLE-${2003 + (h % 23)}-BLG-${100 + ((h >>> 5) % 900)}`, log: logOf('planet') }
+    case 'icomet':
+      return { name: `${3 + (h % 97)}I/${starName(h)}`, log: logOf('interstellar') }
+  }
+}
+
 // ── 등록부 — 태양계·궁수자리 A* 같은 수작업 천체는 여기 이름이 박힌다.
 const REGISTRY = new Map<number, RealName>()
 

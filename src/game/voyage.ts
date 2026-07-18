@@ -21,7 +21,7 @@ import type { Renderer } from '../engine/renderer'
 import { Rng, hashSeed } from '../engine/rng'
 import { Shape } from '../engine/shapes'
 import { KUIPER, LY, PROBES, SHELL, STAR_MAP, pxOf, type MapSystem } from './starmap'
-import { nameOf, realName, registerName, starLog, starName, type RealName } from './starnames'
+import { catalogName, nameOf, realName, registerName, starLog, starName, type RealName } from './starnames'
 
 /** 섹터 시드 상수 — 절차 채움(오르트 얼음·떠돌이)의 결정론 유지 */
 export const UNIVERSE_SEED = 20260718
@@ -40,10 +40,38 @@ const DETACH = 1.15
 const FRAME_DRAG = 0.45
 /** 검은 입 흡인 배율 — 같은 반지름의 항성보다 세게 끈다 (밀집천체의 특권) */
 const MAW_PULL = 3
+/**
+ * 에딩턴 한계 — 강착 속도는 내 단면적(R²)에 묶인다 (실물리: 복사압이 유입을 막는다).
+ * 이게 게임의 심장 박동이다: 땅콩이 태양을 먹을 수 **있지만 수 분짜리 공성전**이고,
+ * 커지면 같은 별이 몇 초가 된다 — "커지면 어제 못 삼키던 것을 삼킨다"가 속도로 돌아온다.
+ * (무제한이면 첫 태양을 몇 분에 먹고 "더 할 게 없는" 게임이 된다: 실플레이)
+ */
+const EDDINGTON = 100
 /** 로슈 접근 배율 — (R + r) 의 이 배수 안이면 조석 파괴 */
 const ROCHE = 1.3
-/** 삼킨 부피의 성장 환산 배율 — 1 이상: 성장은 게임의 심장이라 후하게 (실플레이 "느려") */
+/** 삼킨 부피의 성장 환산 배율 */
 const ABSORB_GAIN = 1.15
+/**
+ * 블랙홀 점진 압축 — 같은 질량이면 별보다 훨씬 작다 (실제: 태양 질량 블랙홀 = 3km).
+ * 밀도가 크기에 비례해 커져(D = 3 + 0.9R) 성장 지수가 ⅓ → ¼ 로 자연 감속한다:
+ * 초반 한 입은 경쾌하고, 후반의 우주는 오래도록 압도적으로 거대하다 (실플레이
+ * "존나 빨리 커져서 압도감이 죽는다"의 수리). 태양 하나 ≈ R30, 베텔게우스 ≈ R250.
+ */
+function bhDensity(r: number): number {
+  return 3 + 0.9 * r
+}
+
+/** 반지름 → 부피 (테스트·콘솔용): 이 부피를 넣으면 그 반지름이 된다 */
+export function volFor(radius: number): number {
+  return radius * radius * radius * bhDensity(radius)
+}
+
+/** 부피 → 블랙홀 반지름 (고정점 4회 — 결정론·저비용). 라이벌도 같은 눈금. */
+export function bhRadius(vol: number): number {
+  let r = Math.cbrt(vol / 9)
+  for (let i = 0; i < 4; i++) r = Math.cbrt(vol / bhDensity(r))
+  return r
+}
 /** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째보다 손해: 조급함의 세금 */
 const SHRED_STREAM = 0.75
 /** 조석 파괴가 남기는 고체 심(얼음 핵) 반지름 배율 */
@@ -191,7 +219,8 @@ interface Gas {
 }
 
 const GAS_MAX = 240
-const START_VOL = 340
+/** 시작 부피 — R≈7 (점진 압축 반영: volFor(7)) */
+const START_VOL = 3190
 
 export class Voyage {
   // ── 나 — 검은 입
@@ -264,7 +293,7 @@ export class Voyage {
   private gasIdx = 0
 
   get radius(): number {
-    return Math.cbrt(this.vol)
+    return bhRadius(this.vol)
   }
 
   get eatenThisRun(): number {
@@ -736,7 +765,7 @@ export class Voyage {
       vx: 0,
       vy: 0,
       vz: 0,
-      vol: r * r * r,
+      vol: volFor(r),
     }
   }
 
@@ -861,8 +890,8 @@ export class Voyage {
         b.vz = Math.cos(b.orbA) * tv * si + (b.host ? b.host.vz : 0)
       }
       // 내 중력 — 나보다 작은 것만 내가 끈다 (질량 우위).
-      // 먹이급은 훨씬 멀리서도 딸려온다 (본디 포획 반경 — 지평선보다 크다):
-      // 이게 없으면 3D 에서 입까지 아무것도 안 온다 (계측: 봇 2분 0끼).
+      // **사거리 컷 없음**: 중력은 모든 공간에 미친다. 1/r² 이 자연 감쇠다
+      // ("인근에만 닿으면 안 되잖아" — 실플레이. 돌조각이 곁에서 구경하는 꼴 금지).
       if (b.r < R) {
         const dx = this.x - b.x
         const dy = this.y - b.y
@@ -870,10 +899,13 @@ export class Voyage {
         const d2 = dx * dx + dy * dy + dz * dz
         const d = Math.sqrt(d2) || 1
         const edibleB = b.r < R * EDIBLE
-        const reach = edibleB ? R * 14 + 300 + R * 2 : R * 14
-        if (d < reach) {
+        {
           let g = Math.min(PULL_CAP_BY_ME, (R * R * GRAV * MAW_PULL) / d2)
-          if (edibleB) g = Math.min(PULL_CAP_BY_ME, g + 160 * (1 + R / 120))
+          // 먹이급 견인 보너스 — 상수 사거리 대신 부드러운 감쇠 (전역 유효)
+          if (edibleB) {
+            const near = (R * 20) / (d + R * 20)
+            g = Math.min(PULL_CAP_BY_ME, g + 160 * (1 + R / 120) * near * near)
+          }
           if (!b.free && b.orbR > 0) {
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
             if (g > bind * DETACH) b.free = true // 섭동 — 레일에서 뜯긴다 (Hills)
@@ -938,6 +970,7 @@ export class Voyage {
     }
 
     // 중력 — 나보다 큰 것만 나를 끈다. 커질수록 세계가 조용해진다.
+    // 사거리 컷 없음 — 1/r² 이 알아서 줄인다.
     for (const b of this.active) {
       if (b.r <= R || this.eaten.has(b.id)) continue
       const dx = b.x - this.x
@@ -945,7 +978,6 @@ export class Voyage {
       const dz = b.z - this.z
       const d2 = dx * dx + dy * dy + dz * dz
       const d = Math.sqrt(d2) || 1
-      if (d > b.r * 9) continue
       const g = Math.min(PULL_CAP_ON_ME, (b.r * b.r * GRAV) / d2)
       this.vx += (dx / d) * g * step
       this.vy += (dy / d) * g * step
@@ -984,7 +1016,10 @@ export class Voyage {
 
     // ── 가스 스트림 강착 — 찢긴 질량은 구름으로 흘러들어와 서서히 내 것이 된다
     if (this.streamIn > 0.5) {
-      const take = this.streamIn * (1 - Math.exp(-2.2 * step))
+      const take = Math.min(
+        this.streamIn * (1 - Math.exp(-2.2 * step)),
+        EDDINGTON * R * R * 2 * step,
+      )
       this.vol += take
       this.streamIn -= take
       this.feed = Math.max(this.feed, 0.55)
@@ -1007,7 +1042,11 @@ export class Voyage {
         const strength = d <= contact ? 1 : Math.pow(Math.max(0, 1 - (d - contact) / (contact * 2.2)), 2)
         if (strength < 0.03) continue
         const frac = (0.35 + 0.35 * Math.min(1, R / b.r)) * (gassy ? 1.6 : 1)
-        const bite = b.r * b.r * b.r * frac * strength * step
+        // 에딩턴 캡 — 지구·목성은 여전히 순식간, 태양은 작을 땐 공성전
+        const bite = Math.min(
+          b.r * b.r * b.r * frac * strength,
+          EDDINGTON * R * R * (1 + this.quasar * 1.5),
+        ) * step
         b.r = Math.cbrt(Math.max(1, b.r * b.r * b.r - bite))
         this.streamIn += bite * ABSORB_GAIN
         this.feed = Math.max(this.feed, 0.25 + strength * 0.5)
@@ -1097,7 +1136,7 @@ export class Voyage {
     this.bittenCd = Math.max(0, this.bittenCd - step)
     for (let i = this.rivals.length - 1; i >= 0; i--) {
       const rv = this.rivals[i]!
-      const rr = Math.cbrt(rv.vol)
+      const rr = bhRadius(rv.vol)
       const dx = this.x - rv.x
       const dy = this.y - rv.y
       const dz = this.z - rv.z
@@ -1228,7 +1267,7 @@ export class Voyage {
       mg.rad *= Math.exp(-1.5 * step)
       mg.z *= Math.exp(-2 * step)
       this.feed = Math.max(this.feed, 0.7)
-      const rr = Math.cbrt(mg.vol)
+      const rr = bhRadius(mg.vol)
       if (mg.rad < Math.max(2, R * 0.55) || mg.t > 2.6) {
         // 합병 완성 — 중력파가 퍼지고, 질량은 영상처럼 부풀어 들어온다
         this.streamIn += mg.vol * ABSORB_GAIN
@@ -1387,23 +1426,22 @@ export class Voyage {
   private nameBody(b: Body): RealName {
     const reg = nameOf(b.id)
     if (reg) return reg
-    const px = Math.hypot(b.x, b.y)
+    // 등록부에 없는 잡천체는 실제 카탈로그 명명법 — 유명 이름 돌려쓰기 금지 (중복 도배)
     switch (b.kind) {
       case BodyKind.Sun:
-        return b.r < 55 ? realName('brown', b.id)
-          : realName(px < pxOf(600) ? 'sunBright' : 'sunHyper', b.id)
+        return catalogName(b.r < 55 ? 'brown' : 'star', b.id)
       case BodyKind.Garden:
         return realName('nebula', b.id)
       case BodyKind.Core:
         return realName('galaxy', b.id)
       case BodyKind.Comet:
-        return realName('interstellar', b.id)
+        return catalogName('icomet', b.id)
       case BodyKind.Ringed:
       case BodyKind.Rock:
-        return realName('planet', b.id)
+        return catalogName('rogue', b.id)
       default:
         return b.r >= 10
-          ? realName('asteroid', b.id)
+          ? catalogName('minor', b.id)
           : { name: starName(b.id), log: starLog(b.id) }
     }
   }
@@ -1719,7 +1757,7 @@ export class Voyage {
 
     // 다른 검은 입들
     for (const rv of this.rivals) {
-      const rr = Math.cbrt(rv.vol)
+      const rr = bhRadius(rv.vol)
       const depth = F + (this.z - rv.z)
       if (depth < F * 0.18) continue
       const persp = Math.min(3, F / depth)

@@ -14,7 +14,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { hashSeed } from '../engine/rng'
 import { LY, STAR_MAP } from '../game/starmap'
-import { BodyKind, type Voyage } from '../game/voyage'
+import { BodyKind, bhRadius, type Voyage } from '../game/voyage'
 
 /** 행성 대기 림 색 — 대기 조성이 곧 색이다 */
 const EARTH_ID = hashSeed('sol:지구')
@@ -202,15 +202,16 @@ export class Scene3D {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5))
     this.scene = new THREE.Scene()
     this.overlay = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x030510)
-    this.scene.fog = new THREE.FogExp2(0x05070f, 0.00004)
+    this.scene.background = new THREE.Color(0x020207)
+    this.scene.fog = new THREE.FogExp2(0x030409, 0.00004)
     this.camera = new THREE.PerspectiveCamera(58, 1.77, 1, 400000)
 
-    // 우주는 칠흑이지만 게임은 보여야 한다 — 은은한 전역광 + 반대편 보조광
-    this.scene.add(new THREE.AmbientLight(0x9aa8c8, 1.25))
+    // 우주는 칠흑이지만 게임은 보여야 한다 — 중성 전역광 (청회색을 쓰면
+    // 화면 전체가 90년대 도스 게임처럼 푸르뎅뎅해진다: 실플레이)
+    this.scene.add(new THREE.AmbientLight(0xbdb6ab, 0.9))
     this.sun = new THREE.DirectionalLight(0xfff2dd, 1.4)
     this.scene.add(this.sun)
-    const fill = new THREE.DirectionalLight(0x6677aa, 0.4)
+    const fill = new THREE.DirectionalLight(0x8a8278, 0.3)
     fill.position.set(-3, -2, -4)
     this.scene.add(fill)
 
@@ -219,7 +220,7 @@ export class Scene3D {
 
     const sphere = new THREE.SphereGeometry(1, 20, 14)
     const litMat = new THREE.MeshLambertMaterial()
-    litMat.emissive = new THREE.Color(0x1c2436) // 완전 검정으로는 안 떨어진다
+    litMat.emissive = new THREE.Color(0x161412) // 완전 검정으로는 안 떨어진다 — 중성 웜톤
     this.lit = new THREE.InstancedMesh(sphere, litMat, MAX_INST)
     this.lit.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.lit)
@@ -332,17 +333,17 @@ void main(){
 
     // 황도 기준면 — 수직 이동이 "보이게" 하는 유일한 잣대. 별은 무한원경이라
     // z 로 움직여도 아무 시차가 없다 (실플레이 "z축 못 움직여"의 정체).
-    this.ecliptic = new THREE.PolarGridHelper(1, 12, 10, 56, 0x33477a, 0x1c2a4d)
+    this.ecliptic = new THREE.PolarGridHelper(1, 12, 10, 56, 0x2a3546, 0x18202e)
     const em = this.ecliptic.material as THREE.Material
     em.transparent = true
-    em.opacity = 0.22
+    em.opacity = 0.05 // 평소엔 유령처럼 — 수직 기동 때만 떠오른다 (도스 그리드 금지)
     em.depthWrite = false
     this.overlay.add(this.ecliptic)
 
     this.axes = new THREE.AxesHelper(1)
     const am = this.axes.material as THREE.Material
     am.transparent = true
-    am.opacity = 0.75
+    am.opacity = 0.5
     am.depthWrite = false
     this.overlay.add(this.axes)
 
@@ -498,9 +499,11 @@ void main(){
     if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.5 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
-    // 기준면은 황도(z=0)에 고정 — 내가 뜨고 가라앉는 게 이 면을 잣대로 읽힌다
+    // 기준면은 황도(z=0)에 고정 — 수직 기동 중에만 뚜렷해진다
     this.ecliptic.position.set(px, 0, pz)
-    this.ecliptic.scale.setScalar(dist * 3.2)
+    this.ecliptic.scale.setScalar(dist * 2.2)
+    ;(this.ecliptic.material as THREE.Material).opacity =
+      0.04 + Math.min(0.18, Math.abs(g.vz) / (dist * 0.5))
     this.axes.position.set(px, py, pz)
     this.axes.scale.setScalar(dist * 0.22)
 
@@ -734,7 +737,7 @@ void main(){
         rg.visible = false
         continue
       }
-      const rr = Math.cbrt(rv.vol)
+      const rr = bhRadius(rv.vol)
       m.visible = true
       m.position.set(rv.x, rv.z, rv.y)
       m.scale.setScalar(rr)
@@ -788,7 +791,7 @@ void main(){
     // 나선낙하 — 상대가 미친 속도로 나를 감아 돈다 (LIGO)
     if (g.merging) {
       const mg = g.merging
-      const rr = Math.cbrt(mg.vol)
+      const rr = bhRadius(mg.vol)
       this.mergeMesh.visible = true
       this.mergeMesh.position.set(
         px + Math.cos(mg.ang) * mg.rad,

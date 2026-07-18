@@ -22,7 +22,7 @@ import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
 import { SHELL, STAR_MAP } from './starmap'
 import { nameOf } from './starnames'
-import { BodyKind, Voyage, rankOf, type Body, type Store } from './voyage'
+import { BodyKind, Voyage, rankOf, volFor, type Body, type Store } from './voyage'
 
 function mockInput(x: number, y: number, lift = 0): Input {
   return { move: { x, y }, lift } as unknown as Input
@@ -70,7 +70,7 @@ describe('검은 입', () => {
   it('② 작은 것은 삼켜지고, 나는 커지고, 명부에 남는다', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = 9000 // R ≈ 20.8 — 천왕성·해왕성이 먹이가 되는 크기
+    g.vol = volFor(21) // R = 21 — 천왕성·해왕성이 먹이가 되는 크기
     const R = g.radius
     const prey = g.active.find(
       (b) => b.r < R * 0.7 && b.r > 2 && (b.kind !== BodyKind.Dust || b.r >= 10),
@@ -110,7 +110,7 @@ describe('검은 입', () => {
     const store = memStore()
     const g = new Voyage()
     g.start(store)
-    g.vol = 9000
+    g.vol = volFor(21)
     const prey = g.active.find(
       (b) => b.r < g.radius * 0.7 && b.r > 2 && (b.kind !== BodyKind.Dust || b.r >= 10),
     )!
@@ -120,7 +120,7 @@ describe('검은 입', () => {
 
     const g2 = new Voyage()
     g2.start(store)
-    expect(g2.vol, '크기는 리셋된다 — 항해는 언제나 티끌에서').toBe(340)
+    expect(Math.round(g2.radius), '크기는 리셋된다 — 항해는 언제나 티끌에서').toBe(7)
     expect(g2.journal.some((e) => e.name === eatenName), '명부는 이어진다').toBe(true)
     expect(g2.voyages, '항해 횟수가 센다').toBe(2)
     expect(g2.active.some((b) => b.id === prey.id), '우주는 아문다').toBe(true)
@@ -130,7 +130,7 @@ describe('검은 입', () => {
     const g = new Voyage()
     g.start(null)
     expect(rankOf(g.radius)).toBe('티끌')
-    g.vol = 13 * 13 * 13 // R = 13 — '검은 입' 문턱(12) 위
+    g.vol = volFor(13) // R = 13 — '검은 입' 문턱(12) 위
     g.update(mockInput(0, 0), 1 / 60)
     expect(g.rankUp, '등급 이벤트가 발행됐다').toBe('검은 입')
   })
@@ -171,7 +171,7 @@ describe('검은 입', () => {
     )
     expect(moon, '달이 있다').toBeTruthy()
     const host = moon!.host!
-    g.vol = Math.pow(host.r * 2, 3)
+    g.vol = volFor(host.r * 2)
     const input = mockInput(0, 0)
     for (let s = 0; s < 30; s++) {
       g.x = moon!.x + g.radius * 1.9
@@ -192,7 +192,7 @@ describe('검은 입', () => {
     const target = g.active.find((b) => b.r > 10 && b.r < 60)
     expect(target, '대상 천체가 있다 (천왕성쯤)').toBeTruthy()
     const R = target!.r / 0.9
-    g.vol = R * R * R
+    g.vol = volFor(R)
     g.x = target!.x + (R + target!.r) * 1.1
     g.y = target!.y
     g.z = target!.z
@@ -218,7 +218,7 @@ describe('검은 입', () => {
     const run = (pvx: number): number => {
       const g = new Voyage()
       g.start(null)
-      g.vol = 9000
+      g.vol = volFor(21)
       const prey = g.active.find((b) => b.r < g.radius * 0.7 && b.r > 3)!
       prey.free = true
       prey.host = null
@@ -237,13 +237,14 @@ describe('검은 입', () => {
     }
     const fwd = run(900)
     const back = run(-900)
-    expect(fwd - back, '먹이 속도 방향으로 밀렸다').toBeGreaterThan(1)
+    // 질량비가 압축으로 무거워져 전달량은 작다 — 방향만 확실하면 보존은 증명된다
+    expect(fwd - back, '먹이 속도 방향으로 밀렸다').toBeGreaterThan(0.25)
   })
 
   it('⑫ 작은 몸의 조석 파괴는 연쇄 폭발하지 않는다', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = 15
+    g.vol = volFor(2.47)
     const R = g.radius
     const victim = g.active[0]!
     const planted = {
@@ -300,7 +301,7 @@ describe('검은 입', () => {
   it('⑭ 커져도 세계는 보인다 — 시야 비례 로드', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = Math.pow(500, 3)
+    g.vol = volFor(500)
     const prox = STAR_MAP.find((s) => s.name === '프록시마 센타우리')!
     g.x = prox.x
     g.y = prox.y
@@ -385,7 +386,7 @@ describe('검은 입', () => {
   it('⑱ 은하화 — 거대해지면 잔챙이는 삼켜지지 않고 나를 영원히 돈다', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = Math.pow(70, 3) // R 70 — 은하화 문턱(60) 위
+    g.vol = volFor(70) // R 70 — 은하화 문턱(60) 위
     const victim = g.active[0]!
     const tiny = {
       ...victim,
@@ -409,11 +410,11 @@ describe('검은 입', () => {
   it('⑲ 블랙홀 합병 — 나선낙하로 감아 돌다 하나가 되고, 중력파가 퍼진다', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = Math.pow(80, 3)
+    g.vol = volFor(80)
     const R = g.radius
     g.rivals.push({
       id: 55555, x: g.x + R * 1.2, y: g.y, z: g.z, vx: 0, vy: 0, vz: 0,
-      vol: Math.pow(R * 0.5, 3),
+      vol: volFor(R * 0.5),
     })
     const vol0 = g.vol
     const input = mockInput(0, 0)
@@ -478,7 +479,10 @@ describe('검은 입', () => {
         if (starve > worstStarve) worstStarve = starve
       }
     }
-    expect(g.vol, `2분 뒤 부피 (r=${Math.round(g.radius)})`).toBeGreaterThan(340 * 3)
+    // 압축비 도입 후 성장은 느긋해야 정상 — 2분에 반지름이 "의미 있게"만 자라면 된다
+    expect(g.radius, '2분 뒤 반지름').toBeGreaterThan(8.2)
+    // 압도감 계약 — 2분 만에 행성 사냥꾼급이면 우주가 작아진다 (과속 금지)
+    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(22)
     expect(worstStarve, '최장 기아 구간(초)').toBeLessThan(30)
   })
 })
