@@ -42,8 +42,13 @@ void main(){
   // 사건의 지평선 — 렌즈 다음에 깎아야 진짜 검다
   col = mix(col, vec3(0.0), smoothstep(uR*1.02, uR*0.88, d));
   // 광자 고리
+  // 광자 고리 — EHT 스타일 이중 고리 + 도플러 비대칭(다가오는 쪽이 밝다)
+  float angH = atan(p.y, p.x);
+  float dopp = 1.0 + 0.55 * sin(angH);
   float ring = exp(-abs(d - uR*1.06)/(uR*0.05));
-  col += vec3(1.4,1.05,0.6) * ring * 0.5;
+  float subring = exp(-abs(d - uR*1.18)/(uR*0.022));
+  col += vec3(1.4,1.05,0.6) * ring * 0.5 * dopp;
+  col += vec3(1.2,0.95,0.7) * subring * 0.22 * dopp;
   gl_FragColor = vec4(col, 1.0);
 }`,
 }
@@ -86,16 +91,19 @@ function smokeTexture(): THREE.Texture {
 }
 
 function diskTexture(): THREE.Texture {
+  // RingGeometry 의 UV 는 평면 좌표 — **방사형** 그라디언트여야 원반으로 매핑된다
+  // (선형을 쓰면 지름 방향으로 쓸리는 조악한 얼룩이 된다: 실플레이 "조악해"의 범인)
   const c = document.createElement('canvas')
-  c.width = 256
-  c.height = 32
+  c.width = c.height = 256
   const ctx = c.getContext('2d')!
-  const g = ctx.createLinearGradient(0, 0, 256, 0)
-  g.addColorStop(0, 'rgba(255,190,110,0.9)')
-  g.addColorStop(0.35, 'rgba(255,130,50,0.5)')
+  const g = ctx.createRadialGradient(128, 128, 40, 128, 128, 128)
+  g.addColorStop(0, 'rgba(255,255,255,0)')
+  g.addColorStop(0.34, 'rgba(255,244,220,0.95)') // 안쪽 백열 — 가장 뜨겁다
+  g.addColorStop(0.5, 'rgba(255,170,80,0.7)')
+  g.addColorStop(0.75, 'rgba(210,90,140,0.3)')
   g.addColorStop(1, 'rgba(120,60,160,0)')
   ctx.fillStyle = g
-  ctx.fillRect(0, 0, 256, 32)
+  ctx.fillRect(0, 0, 256, 256)
   return new THREE.CanvasTexture(c)
 }
 
@@ -121,6 +129,9 @@ export class Scene3D {
   private readonly gasSprites: THREE.Sprite[] = []
   private readonly marks: THREE.Sprite[] = []
   private readonly playerMesh: THREE.Mesh
+  private readonly mergeMesh: THREE.Mesh
+  private readonly mergeGlow: THREE.Sprite
+  private readonly waves: THREE.Mesh[] = []
   private readonly disk: THREE.Mesh
   private readonly stars: THREE.Points
   private readonly sun: THREE.DirectionalLight
@@ -203,6 +214,28 @@ export class Scene3D {
     // 나 — 빛의 부재. 구체는 검고, 지평선·광자 고리는 렌즈 셰이더가 마무리한다
     this.playerMesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color: 0x000000 }))
     this.scene.add(this.playerMesh)
+    // 나선낙하 중인 상대 — 검은 구 + 백열 테
+    this.mergeMesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color: 0x000000 }))
+    this.mergeMesh.visible = false
+    this.scene.add(this.mergeMesh)
+    this.mergeGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+      color: 0xffd9a0,
+    }))
+    this.mergeGlow.visible = false
+    this.scene.add(this.mergeGlow)
+    // 중력파 — 합병 지점에서 퍼지는 시공의 고리 두 겹
+    const waveGeo = new THREE.RingGeometry(0.92, 1, 72)
+    for (let i = 0; i < 2; i++) {
+      const wv = new THREE.Mesh(waveGeo, new THREE.MeshBasicMaterial({
+        color: 0x9fb4ff, blending: THREE.AdditiveBlending, transparent: true,
+        side: THREE.DoubleSide, depthWrite: false,
+      }))
+      wv.rotation.x = -Math.PI / 2
+      wv.visible = false
+      this.waves.push(wv)
+      this.scene.add(wv)
+    }
     this.disk = new THREE.Mesh(
       new THREE.RingGeometry(1.35, 3.1, 72),
       new THREE.MeshBasicMaterial({
@@ -479,13 +512,20 @@ export class Scene3D {
         this.col.setRGB(Math.min(1, b.cr), Math.min(1, b.cg), Math.min(1, b.cb))
         this.emis.setColorAt(emisN, this.col)
         emisN++
-        if (b.kind === BodyKind.Sun && glowN < MAX_GLOW) {
+        if (b.kind === BodyKind.Sun && glowN < MAX_GLOW - 1) {
+          // 이중 후광 — 바깥 색 코로나 + 안쪽 백열 코어 (사진 속 별처럼)
           const sp = this.glows[glowN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)
-          sp.scale.setScalar(sc * 6)
+          sp.scale.setScalar(sc * 7)
           sp.material.color.setRGB(b.cr * 0.6, b.cg * 0.5, b.cb * 0.3)
-          sp.material.opacity = 0.55
+          sp.material.opacity = 0.7
+          const core = this.glows[glowN++]!
+          core.visible = true
+          core.position.set(ax, ay, az)
+          core.scale.setScalar(sc * 2.6)
+          core.material.color.setRGB(1.4, 1.3, 1.1)
+          core.material.opacity = 0.85
         }
       } else if (litN < MAX_INST) {
         this.lit.setMatrixAt(litN, this.m4)
@@ -591,6 +631,39 @@ export class Scene3D {
     this.haloMesh.count = haloN
     this.haloMesh.instanceMatrix.needsUpdate = true
     if (this.haloMesh.instanceColor) this.haloMesh.instanceColor.needsUpdate = true
+
+    // 나선낙하 — 상대가 미친 속도로 나를 감아 돈다 (LIGO)
+    if (g.merging) {
+      const mg = g.merging
+      const rr = Math.cbrt(mg.vol)
+      this.mergeMesh.visible = true
+      this.mergeMesh.position.set(
+        px + Math.cos(mg.ang) * mg.rad,
+        py + mg.z,
+        pz + Math.sin(mg.ang) * mg.rad,
+      )
+      this.mergeMesh.scale.setScalar(rr)
+      this.mergeGlow.visible = true
+      this.mergeGlow.position.copy(this.mergeMesh.position)
+      this.mergeGlow.scale.setScalar(rr * 3)
+      this.mergeGlow.material.opacity = 0.9
+    } else {
+      this.mergeMesh.visible = false
+      this.mergeGlow.visible = false
+    }
+    // 중력파 — 퍼지는 고리
+    for (let i = 0; i < this.waves.length; i++) {
+      const wv = this.waves[i]!
+      const k = (g.waveT - i * 0.22) / 1.6
+      if (k > 0 && k < 1) {
+        wv.visible = true
+        wv.position.set(g.waveX, g.waveZ, g.waveY)
+        wv.scale.setScalar(R * (2 + k * 60))
+        ;(wv.material as THREE.MeshBasicMaterial).opacity = (1 - k) * 0.6
+      } else {
+        wv.visible = false
+      }
+    }
 
     // 나 + 원반
     this.playerMesh.position.set(px, py, pz)

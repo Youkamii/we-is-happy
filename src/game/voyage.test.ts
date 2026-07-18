@@ -406,6 +406,26 @@ describe('검은 입', () => {
     expect(g.active.some((b) => b.id === tiny.id), '세계에서는 사라졌다').toBe(false)
   })
 
+  it('⑲ 블랙홀 합병 — 나선낙하로 감아 돌다 하나가 되고, 중력파가 퍼진다', () => {
+    const g = new Voyage()
+    g.start(null)
+    g.vol = Math.pow(80, 3)
+    const R = g.radius
+    g.rivals.push({
+      id: 55555, x: g.x + R * 1.2, y: g.y, z: g.z, vx: 0, vy: 0, vz: 0,
+      vol: Math.pow(R * 0.5, 3),
+    })
+    const vol0 = g.vol
+    const input = mockInput(0, 0)
+    g.update(input, 1 / 60)
+    expect(g.merging, '나선낙하가 시작됐다').toBeTruthy()
+    expect(g.rivals.length, '상대는 궤도에 물렸다').toBe(0)
+    for (let s = 0; s < 300; s++) g.update(input, 1 / 60)
+    expect(g.merging, '합병이 끝났다').toBeNull()
+    expect(g.waveT, '중력파가 퍼졌다').toBeLessThan(6)
+    expect(g.vol, '질량이 내 것이 됐다').toBeGreaterThan(vol0 * 1.05)
+  })
+
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {
     const g = new Voyage()
     g.start(null)

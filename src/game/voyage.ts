@@ -232,9 +232,13 @@ export class Voyage {
   private gulp = 0
   feed = 0
   private bittenCd = 0
-  private waveX = 0
-  private waveY = 0
-  private waveT = 1e9
+  /** 중력파 — 합병 지점에서 시공의 고리가 퍼진다 (렌더가 읽는다) */
+  waveX = 0
+  waveY = 0
+  waveZ = 0
+  waveT = 1e9
+  /** 나선낙하 — 합병 직전, 서로를 미친 속도로 감아 도는 단계 (LIGO) */
+  merging: { ang: number; rad: number; w: number; t: number; vol: number; z: number } | null = null
   private nibbleCd = 0
   private driftCd = 3
   private driftN = 0
@@ -289,6 +293,7 @@ export class Voyage {
     this.gulp = 0
     this.feed = 0
     this.bittenCd = 0
+    this.merging = null
     this.biggestMeal = 0
     this.bestR = 0
     this.voyages = 0
@@ -934,7 +939,7 @@ export class Voyage {
 
     // ── 가스 스트림 강착 — 찢긴 질량은 구름으로 흘러들어와 서서히 내 것이 된다
     if (this.streamIn > 0.5) {
-      const take = this.streamIn * (1 - Math.exp(-3.2 * step))
+      const take = this.streamIn * (1 - Math.exp(-2.2 * step))
       this.vol += take
       this.streamIn -= take
       this.feed = Math.max(this.feed, 0.55)
@@ -1106,36 +1111,19 @@ export class Voyage {
           this.vy += (dy / d) * kb
           this.camera.shake(6, 8)
           this.sfx('hurt')
-        } else if (!bigger && rr < R * EDIBLE) {
-          // 합병 — 중력파가 퍼지고, 가스 고리가 뿜어져 나온다
-          this.vol += rv.vol * ABSORB_GAIN
-          this.gulp = 1
-          this.feed = 1
-          if (rr > this.biggestMeal) this.biggestMeal = Math.round(rr)
+        } else if (!bigger && rr < R * EDIBLE && !this.merging) {
+          // 나선낙하 시작 — 즉석 흡수가 아니라 미친 회전으로 감아 돈다 (LIGO)
           this.eaten.add(rv.id)
-          const rn = realName('hole', rv.id)
-          const entry: JournalEntry = {
-            name: `${rn.name} — 다른 검은 입`,
-            log: rn.log,
-            kind: BodyKind.Core,
-            r: Math.round(rr),
-            x: Math.round(rv.x),
-            y: Math.round(rv.y),
-          }
-          this.journal.push(entry)
-          this.lastFound = entry
-          this.waveX = rv.x
-          this.waveY = rv.y
-          this.waveT = 0
-          for (let g = 0; g < 14; g++) {
-            const a = (g / 14) * Math.PI * 2
-            this.spawnGas(rv.x, rv.y, rv.z,
-              Math.cos(a) * rr * 3, Math.sin(a) * rr * 3, (g % 3 - 1) * rr,
-              rr * 0.5, 0.5, 0.35, 0.6, 1.4)
+          this.merging = {
+            ang: Math.atan2(rv.y - this.y, rv.x - this.x),
+            rad: Math.max(d, R * 1.2),
+            w: 2.2,
+            t: 0,
+            vol: rv.vol,
+            z: rv.z - this.z,
           }
           this.rivals.splice(i, 1)
-          this.sfx('bigKill')
-          this.persist()
+          this.sfx('boom')
         }
       }
     }
@@ -1145,6 +1133,49 @@ export class Voyage {
 
     // 은하 공전 — 포획된 별들은 나를 영원히 돈다
     for (const h of this.halo) h.ang += h.w * step
+
+    // ── 나선낙하 → 합병 — 각속도가 폭주하며 감아 돌다 하나가 된다 (LIGO 처프)
+    if (this.merging) {
+      const mg = this.merging
+      mg.t += step
+      mg.w += step * 11 // 처프 — 미친듯이 빨라진다
+      mg.ang += mg.w * step
+      mg.rad *= Math.exp(-1.5 * step)
+      mg.z *= Math.exp(-2 * step)
+      this.feed = Math.max(this.feed, 0.7)
+      const rr = Math.cbrt(mg.vol)
+      if (mg.rad < Math.max(2, R * 0.55) || mg.t > 2.6) {
+        // 합병 완성 — 중력파가 퍼지고, 질량은 영상처럼 부풀어 들어온다
+        this.streamIn += mg.vol * ABSORB_GAIN
+        this.gulp = 1
+        this.feed = 1
+        if (rr > this.biggestMeal) this.biggestMeal = Math.round(rr)
+        const rn = realName('hole', (mg.vol | 0) >>> 0)
+        const entry: JournalEntry = {
+          name: `${rn.name} — 다른 검은 입`,
+          log: rn.log,
+          kind: BodyKind.Core,
+          r: Math.round(rr),
+          x: Math.round(this.x),
+          y: Math.round(this.y),
+        }
+        this.journal.push(entry)
+        this.lastFound = entry
+        this.waveX = this.x
+        this.waveY = this.y
+        this.waveZ = this.z
+        this.waveT = 0
+        for (let g = 0; g < 14; g++) {
+          const a = (g / 14) * Math.PI * 2
+          this.spawnGas(this.x, this.y, this.z,
+            Math.cos(a) * rr * 3, Math.sin(a) * rr * 3, ((g % 3) - 1) * rr,
+            rr * 0.5, 0.5, 0.35, 0.6, 1.4)
+        }
+        this.merging = null
+        this.sfx('bigKill')
+        this.persist()
+      }
+    }
 
     // 가스 — 살아있는 연기. 내 쪽으로 약하게 감긴다
     for (const g of this.gas) {
@@ -1297,7 +1328,11 @@ export class Voyage {
     this.vx += (b.vx - this.vx) * f
     this.vy += (b.vy - this.vy) * f
     this.vz += (b.vz - this.vz) * f
-    this.vol += bMass * ABSORB_GAIN
+    // 성장은 영상처럼 — 큰 수확은 한 틱 점프가 아니라 수 초에 걸쳐 부풀어 오른다
+    // ("사람 크기부터 개큰 블랙홀까지 가는 영상": 사용자). 작은 건 즉시.
+    const gain = bMass * ABSORB_GAIN
+    if (gain > this.vol * 0.12) this.streamIn += gain
+    else this.vol += gain
     this.gulp = Math.min(1, b.r / R + 0.25)
     this.eatCount += 1
     if (b.r > this.biggestMeal) this.biggestMeal = Math.round(b.r)
