@@ -272,13 +272,16 @@ function boot(): void {
       ? `\n다음 항로  ${game.routeName} · ${lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(game.routeDist / 1000)}k`}` +
         (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '') + navTag
       : (game.cruise > 1.5 ? `\n성간 순항 ×${game.cruise.toFixed(1)}${navTag}` : navTag ? `\n${navTag.trim()}` : '')
-    // 성장은 반지름이 아니라 질량이다 — 블랙홀은 지구를 먹어도 몸이 9mm 큰다
-    const mE = game.vol / 779
-    const mass = mE >= 936
-      ? `태양 ×${(game.vol / 729000).toFixed(game.vol / 729000 < 100 ? 1 : 0)}`
+    // 성장은 반지름이 아니라 질량이다 — 소화 중(스트림)인 것도 이미 내 질량이다:
+    // 태양을 삼킨 직후 "지구 ×22" 같은 헛숫자를 막는다 (실플레이)
+    const totalVol = game.vol + game.digesting
+    const mE = totalVol / 779
+    const mass = (mE >= 936
+      ? `태양 ×${(totalVol / 729000).toFixed(totalVol / 729000 < 100 ? 1 : 0)}`
       : mE >= 1
         ? `지구 ×${mE >= 100 ? Math.round(mE) : mE.toFixed(1)}`
-        : `달 ×${Math.max(1, Math.round(game.vol / 15.6))}`
+        : `달 ×${Math.max(1, Math.round(totalVol / 15.6))}`) +
+      (game.digesting > totalVol * 0.05 ? ' (소화 중)' : '')
     coords.textContent =
       `${rankOf(game.radius)}  ·  질량 ${mass}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +

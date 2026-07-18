@@ -329,6 +329,11 @@ export class Voyage {
     return bhRadius(this.vol)
   }
 
+  /** 소화 중인 질량 — 이미 내 것이지만 아직 몸에 반영 안 된 것 (HUD 합산용) */
+  get digesting(): number {
+    return this.streamIn
+  }
+
   get eatenThisRun(): number {
     return this.eatCount
   }
