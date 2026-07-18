@@ -134,8 +134,8 @@ function boot(): void {
     line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다', 'font-size:14px;color:#ffb066;line-height:2')
     line('여긴 진짜 우주다 — 달부터. 그다음 행성. 그다음 태양.', 'font-size:14px;color:#8fa8c4;line-height:2')
     line('카이퍼 벨트와 오르트 구름을 지나면, 프록시마까지는 한세월이다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
-    line('이동 WASD·마우스 | 상승 스페이스·하강 시프트 | 시점 오른쪽 드래그·휠', 'font-size:13px;color:#6f8299;line-height:2')
-    line('J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
+    line('마우스를 누르고 있으면 — 가리키는 곳으로 난다 (위아래 포함)', 'font-size:13px;color:#ffd9a8;line-height:2')
+    line('보조: WASD·스페이스·시프트 | 시점: 오른쪽 드래그·휠 | J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
@@ -146,16 +146,45 @@ function boot(): void {
   }
   showTitle()
 
-  // 카메라 기준 이동 — W 는 언제나 "화면의 안쪽"이다
+  // 조작 — 마우스 홀드: 가리키는 곳으로 난다(위아래 포함). 키보드: 카메라 기준.
   const wrapped = { move: { x: 0, y: 0 }, lift: 0 } as unknown as Input
+  const ndc = new THREE.Vector2()
+  const ray = new THREE.Raycaster()
+  const aim = new THREE.Vector3()
   const steer = (): void => {
-    const fx = -Math.sin(scene.yaw)
-    const fy = -Math.cos(scene.yaw)
-    const rx = fy
-    const ry = -fx
-    wrapped.move.x = rx * input.move.x + fx * input.move.y
-    wrapped.move.y = ry * input.move.x + fy * input.move.y
-    ;(wrapped as unknown as { lift: number }).lift = input.lift
+    const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
+    if (input.pointerHeld) {
+      // 조준 비행 — 커서 광선 위 한 점(카메라~나 거리만큼 앞)을 향해 난다
+      const r = canvas.getBoundingClientRect()
+      ndc.set(
+        ((input.pointerCX - r.left) / r.width) * 2 - 1,
+        -(((input.pointerCY - r.top) / r.height) * 2 - 1),
+      )
+      ray.setFromCamera(ndc, scene.camera)
+      const dist = scene.camera.position.distanceTo(aim.set(game.x, game.z, game.y))
+      aim.copy(ray.ray.direction).multiplyScalar(dist * 1.15).add(scene.camera.position)
+      // three (x,y,z) → 게임 (x, z, y)
+      const dx = aim.x - game.x
+      const dy = aim.z - game.y
+      const dz = aim.y - game.z
+      const m = Math.hypot(dx, dy)
+      const total = Math.hypot(dx, dy, dz)
+      if (total > game.radius * 2.2) {
+        w.move.x = m > 1 ? dx / m : 0
+        w.move.y = m > 1 ? dy / m : 0
+        w.lift = Math.min(1, Math.max(-1, (dz / (total || 1)) * 2.2))
+      } else {
+        w.move.x = 0
+        w.move.y = 0
+        w.lift = 0
+      }
+    } else {
+      const fx = -Math.sin(scene.yaw)
+      const fy = -Math.cos(scene.yaw)
+      w.move.x = fy * input.move.x + fx * input.move.y
+      w.move.y = -fx * input.move.x + fy * input.move.y
+      w.lift = input.lift
+    }
   }
 
   const proj = new THREE.Vector3()

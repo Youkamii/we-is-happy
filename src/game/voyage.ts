@@ -542,7 +542,7 @@ export class Voyage {
     if (rC < 6000) {
       // 황도 먼지 — 요람의 군것질
       const cradle = rC < 3600
-      const cnt = cradle ? 8 + rng.int(4) : 3 + rng.int(3)
+      const cnt = cradle ? 12 + rng.int(5) : 5 + rng.int(3)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:cr:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
@@ -554,7 +554,7 @@ export class Voyage {
     }
     if (rC > SHELL.kuiperIn && rC < SHELL.kuiperOut) {
       // 카이퍼 벨트 — 얼음의 고리
-      const cnt = 7 + rng.int(5)
+      const cnt = 10 + rng.int(6)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:kb:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
@@ -565,7 +565,7 @@ export class Voyage {
       }
     } else if (rC >= SHELL.kuiperOut && rC < SHELL.scatterOut) {
       // 산란 원반 — 세드나의 영역. 벌써 성기다
-      const cnt = 1 + rng.int(3)
+      const cnt = 2 + rng.int(3)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:sc:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
@@ -576,7 +576,7 @@ export class Voyage {
       }
     } else if (rC >= SHELL.oortIn && rC < SHELL.oortOut) {
       // 오르트 구름 — 태양계의 진짜 끝. 수조 개의 얼음. 훑어먹기의 성찬
-      const cnt = 9 + rng.int(6)
+      const cnt = 13 + rng.int(7)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:oo:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
@@ -674,7 +674,8 @@ export class Voyage {
   /** 활성 반경(섹터) — 시야가 커지면 세계도 넓게 깬다. 이게 없으면 거대해질수록
    * 화면이 로드 범위 밖 = 빈 배경만 보인다 (실플레이 판정). */
   private rangeN(): number {
-    return Math.min(6, Math.max(1, Math.ceil((this.camera.viewHeight * 1.15) / SECTOR)))
+    // 3D 원근은 지평선까지 보인다 — 2D 시절(1.15)보다 넓게 깨워야 시야가 안 빈다
+    return Math.min(7, Math.max(1, Math.ceil((this.camera.viewHeight * 1.5) / SECTOR)))
   }
 
   private refreshSectors(force = false): void {

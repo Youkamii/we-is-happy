@@ -155,6 +155,19 @@ export class Input {
     return this.pressed.size > 0 || this.pointerActive
   }
 
+  /** 마우스 홀드 중인가 (터치 제외) — 3D 조준 비행용 */
+  get pointerHeld(): boolean {
+    return this.pointerActive && !this.touchMode
+  }
+
+  get pointerCX(): number {
+    return this.pointerX
+  }
+
+  get pointerCY(): number {
+    return this.pointerY
+  }
+
   endFrame(): void {
     this.pressed.clear()
     this.pointerPressed = false
