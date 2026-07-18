@@ -17,7 +17,7 @@ import { BodyKind, type Voyage } from '../game/voyage'
 const MAX_INST = 2600
 const MAX_GLOW = 160
 const MAX_GAS = 240
-const MAX_MARK = 48
+const MAX_MARK = 120
 
 /** 중력 렌즈 — 화면 공간에서 지평선 둘레로 배경을 휜다 (슈바르츠실트 흉내) */
 const LENS_SHADER = {
@@ -402,11 +402,11 @@ export class Scene3D {
         sp.material.color.setRGB(b.cr * 0.5, b.cg * 0.45, b.cb * 0.6)
         sp.material.opacity = 0.4
       }
-      // 먹이 금테 — 한 입감만
-      if (markN < MAX_MARK && b.r < R * 0.8 && b.r >= R * 0.12) {
+      // 먹이 금테 — 멀리서도 보여야 "먹을 게 있다"가 된다
+      if (markN < MAX_MARK && b.r < R * 0.8 && b.r >= R * 0.1) {
         const dx = b.x - g.x
         const dy = b.y - g.y
-        if (dx * dx + dy * dy < dist * dist * 4) {
+        if (dx * dx + dy * dy < dist * dist * 36) {
           const sp = this.marks[markN++]!
           sp.visible = true
           sp.position.set(ax, ay, az)

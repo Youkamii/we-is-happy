@@ -222,6 +222,8 @@ export class Voyage {
   private waveY = 0
   private waveT = 1e9
   private nibbleCd = 0
+  private driftCd = 3
+  private driftN = 0
   /** 나침반 대상 — 3D 렌더러(main)가 화면 화살표로 그린다 */
   preyX = 0
   preyY = 0
@@ -278,6 +280,9 @@ export class Voyage {
     this.waveT = 1e9
     this.dirty = false
     this.persistCd = 0
+    this.nibbleCd = 0
+    this.driftCd = 3
+    this.driftN = 0
     for (const g of this.gas) g.life = 0
     if (store) {
       try {
@@ -414,7 +419,7 @@ export class Voyage {
       }
     }
     // 소행성대 — 화성과 목성 사이, 실제 그 자리. 첫째 알갱이는 세레스다.
-    for (let i = 0; i < 13; i++) {
+    for (let i = 0; i < 26; i++) {
       const id = hashSeed(`sol:belt:${i}`)
       const d = this.newBody(id, BodyKind.Dust, sun.x, sun.y,
         i === 0 ? 3.4 : 2.4 + ((id >>> 4) % 100) * 0.014, 0.55, 0.5, 0.45)
@@ -544,19 +549,19 @@ export class Voyage {
     if (rC < 6000) {
       // 황도 먼지 — 요람의 군것질
       const cradle = rC < 3600
-      const cnt = cradle ? 12 + rng.int(5) : 5 + rng.int(3)
+      const cnt = cradle ? 20 + rng.int(8) : 9 + rng.int(4)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:cr:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
           sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          3.2 + rng.next() * 2.2, 0.55, 0.5, 0.6)
+          3.4 + rng.next() * 2.6, 0.55, 0.5, 0.6)
         d.z = (rng.next() - 0.5) * 360
         list.push(d)
       }
     }
     if (rC > SHELL.kuiperIn && rC < SHELL.kuiperOut) {
       // 카이퍼 벨트 — 얼음의 고리
-      const cnt = 10 + rng.int(6)
+      const cnt = 14 + rng.int(8)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:kb:${i}`)
         const d = this.newBody(dSeed, BodyKind.Dust,
@@ -1135,6 +1140,32 @@ export class Voyage {
       this.preyX = cX
       this.preyY = cY
       this.preyZ = cZ
+    }
+
+    // ── 성간 먼지 유입 — 우주는 다시 채워진다. 이게 없으면 먹은 자리가 판 내내
+    // 사막이라 "먹을 게 없다"가 재발한다 (실플레이). 몇 초마다 근처에 새 티끌.
+    this.driftCd -= step
+    if (this.driftCd <= 0 && this.active.length < 900) {
+      this.driftCd = 6
+      this.driftN += 1
+      const rng = new Rng(hashSeed(`drift:${this.driftN}`))
+      const n = 2 + rng.int(2)
+      for (let i = 0; i < n; i++) {
+        const a = rng.next() * Math.PI * 2
+        const dd = 500 + rng.next() * 1600
+        const id = hashSeed(`drift:${this.driftN}:${i}`)
+        if (this.eaten.has(id)) continue
+        const d = this.newBody(id, BodyKind.Dust,
+          this.x + Math.cos(a) * dd, this.y + Math.sin(a) * dd,
+          Math.max(2.6, Math.min(R * 0.5, 3 + rng.next() * 3 + R * 0.06)),
+          0.55, 0.52, 0.62)
+        d.z = this.z + (rng.next() - 0.5) * 500
+        d.free = true
+        const sx = Math.floor(d.x / SECTOR)
+        const sy = Math.floor(d.y / SECTOR)
+        this.sectors.get(`${sx},${sy}`)?.push(d)
+        this.active.push(d)
+      }
     }
 
     // 등급
