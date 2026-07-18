@@ -30,6 +30,10 @@ const MAX_INST = 2600
 const MAX_GLOW = 160
 const MAX_GAS = 240
 const MAX_MARK = 120
+/** 성운·은하 연기 군집 풀 — "가도 점 하나"의 수리: 성운은 구체가 아니라 구름이다 */
+const MAX_NEB = 140
+/** 게 펄서 — 등대 빔을 돌릴 유일한 심장 */
+const PULSAR_ID = hashSeed('map:게 성운:펄서')
 
 /** 중력 렌즈 — 화면 공간에서 지평선 둘레로 배경을 휜다 (슈바르츠실트 흉내) */
 const LENS_SHADER = {
@@ -183,6 +187,9 @@ export class Scene3D {
   private readonly rivalMeshes: THREE.Mesh[] = []
   private readonly rivalGlow: THREE.Sprite[] = []
   private readonly rivalRing: THREE.Sprite[] = []
+  private readonly nebSprites: THREE.Sprite[] = []
+  private readonly pulsarBeams: THREE.Mesh[] = []
+  private readonly band: THREE.Points
 
   private readonly ecliptic: THREE.PolarGridHelper
   /** 랜드마크 — 실지도 항성계는 아무리 멀어도 밝은 별점으로 보인다 (항법의 잣대) */
@@ -266,6 +273,29 @@ export class Scene3D {
       sp.visible = false
       this.marks.push(sp)
       this.scene.add(sp)
+    }
+    for (let i = 0; i < MAX_NEB; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: smokeTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+      }))
+      sp.visible = false
+      this.nebSprites.push(sp)
+      this.scene.add(sp)
+    }
+    // 게 펄서 등대 빔 — 자전축에서 기운 자기축을 따라 두 줄기가 우주를 쓸고 돈다.
+    // 좁은 쪽(펄서)에서 넓은 쪽으로 퍼지는 원뿔 껍질 (y 0→1 스팬).
+    {
+      const beamGeo = new THREE.CylinderGeometry(0.34, 0.015, 1, 10, 1, true)
+      beamGeo.translate(0, 0.5, 0)
+      for (let i = 0; i < 2; i++) {
+        const bm = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({
+          color: 0xbfe0ff, blending: THREE.AdditiveBlending, transparent: true,
+          opacity: 0, depthWrite: false, side: THREE.DoubleSide,
+        }))
+        bm.visible = false
+        this.pulsarBeams.push(bm)
+        this.scene.add(bm)
+      }
     }
 
     // 나 — 빛의 부재. 구체는 검고, 지평선·광자 고리는 렌즈 셰이더가 마무리한다
@@ -375,6 +405,35 @@ void main(){
       blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 1,
     }))
     this.scene.add(this.stars)
+
+    // 은하수 띠 — 하늘을 가로지르는 별의 강. 우리가 은하 원반 **안**에 있다는
+    // 증거다 ("우주에 점같은 별만 있어?": 실플레이). 은하면은 황도에서 60° 기울었다.
+    const bandN = 1700
+    const bpos = new Float32Array(bandN * 3)
+    const bcol = new Float32Array(bandN * 3)
+    for (let i = 0; i < bandN; i++) {
+      const a = rnd() * Math.PI * 2
+      const h = ((rnd() + rnd() + rnd()) / 1.5 - 1) * 0.16 // 가운데가 짙은 띠
+      const n = Math.hypot(1, h)
+      bpos[i * 3] = Math.cos(a) / n
+      bpos[i * 3 + 1] = h / n
+      bpos[i * 3 + 2] = Math.sin(a) / n
+      // 은하 중심(남쪽) 방향이 더 밝고 노랗다 — 팽대부를 바라보는 시선
+      const core = Math.max(0, Math.cos(a - Math.PI * 1.5)) * 0.5
+      const w = 0.1 + rnd() * 0.2 + core * (0.14 + rnd() * 0.2)
+      bcol[i * 3] = w * (0.9 + core * 0.3)
+      bcol[i * 3 + 1] = w * (0.85 + core * 0.15)
+      bcol[i * 3 + 2] = w * 0.95
+    }
+    const bandGeo = new THREE.BufferGeometry()
+    bandGeo.setAttribute('position', new THREE.BufferAttribute(bpos, 3))
+    bandGeo.setAttribute('color', new THREE.BufferAttribute(bcol, 3))
+    this.band = new THREE.Points(bandGeo, new THREE.PointsMaterial({
+      size: 2.1, sizeAttenuation: false, vertexColors: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9,
+    }))
+    this.band.rotation.set(1.02, 0, 0.35)
+    this.scene.add(this.band)
 
     for (let i = 0; i < 12; i++) {
       const m = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color: 0x000000 }))
@@ -499,6 +558,8 @@ void main(){
     if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.5 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
+    this.band.position.copy(this.camera.position)
+    this.band.scale.setScalar(dist * 40)
     // 기준면은 황도(z=0)에 고정 — 수직 기동 중에만 뚜렷해진다
     this.ecliptic.position.set(px, 0, pz)
     this.ecliptic.scale.setScalar(dist * 2.2)
@@ -551,6 +612,12 @@ void main(){
     let glowN = 0
     let markN = 0
     let ringN = 0
+    let nebN = 0
+    let pulsarSeen = false
+    let pulsarX = 0
+    let pulsarY = 0
+    let pulsarZ = 0
+    let pulsarR = 0
     for (const b of g.active) {
       if (b.kind === BodyKind.Sun) {
         const d = (b.x - g.x) ** 2 + (b.y - g.y) ** 2
@@ -598,6 +665,59 @@ void main(){
       this.v3.set(ax, ay, az)
       this.s3.setScalar(Math.max(0.6, sc))
       this.m4.compose(this.v3, this.q0, this.s3)
+      if (b.id === PULSAR_ID) {
+        pulsarSeen = true
+        pulsarX = ax
+        pulsarY = ay
+        pulsarZ = az
+        pulsarR = sc
+      }
+      // 성운·은하 — 구체가 아니라 연기의 군집이다 ("가도 점 하나": 실플레이).
+      // 은하(Core 대형)는 나선을 그리는 납작한 원반, 성운은 두툼한 뭉게구름.
+      if (b.kind === BodyKind.Garden || (b.kind === BodyKind.Core && b.r > 600)) {
+        const isCore = b.kind === BodyKind.Core
+        const blobs = isCore ? 10 : 7
+        for (let k = 0; k < blobs && nebN < MAX_NEB; k++) {
+          const hh = (b.id + k * 2654435761) >>> 0
+          const a1 = (hh % 628) * 0.01
+          const rad = sc * (isCore ? 0.12 + ((hh >>> 8) % 100) * 0.008 : 0.2 + ((hh >>> 8) % 100) * 0.009)
+          const spiral = isCore ? a1 + (rad / sc) * 3.4 : a1
+          const zz = (((hh >>> 16) % 100) - 50) * 0.01 * sc * (isCore ? 0.16 : 0.5)
+          const sp = this.nebSprites[nebN++]!
+          sp.visible = true
+          sp.position.set(ax + Math.cos(spiral) * rad, ay + zz, az + Math.sin(spiral) * rad)
+          sp.scale.setScalar(sc * (isCore ? 0.45 : 0.7) * (0.6 + ((hh >>> 20) % 60) * 0.01))
+          sp.material.color.setRGB(b.cr * 0.42, b.cg * 0.4, b.cb * 0.5)
+          sp.material.opacity = isCore ? 0.3 : 0.24
+        }
+        if (glowN < MAX_GLOW) {
+          const sp = this.glows[glowN++]!
+          sp.visible = true
+          sp.position.set(ax, ay, az)
+          sp.scale.setScalar(sc * (isCore ? 0.7 : 1.3))
+          sp.material.color.setRGB(Math.min(1, b.cr * 0.9), Math.min(1, b.cg * 0.8), Math.min(1, b.cb))
+          sp.material.opacity = isCore ? 0.5 : 0.3
+        }
+        continue
+      }
+      // 항성질량 블랙홀(백조자리 X-1) — 동족이다: 검은 구 + 백열 강착 테
+      if (b.kind === BodyKind.Core) {
+        if (litN < MAX_INST) {
+          this.lit.setMatrixAt(litN, this.m4)
+          this.col.setRGB(0.02, 0.02, 0.03)
+          this.lit.setColorAt(litN, this.col)
+          litN++
+        }
+        if (glowN < MAX_GLOW) {
+          const sp = this.glows[glowN++]!
+          sp.visible = true
+          sp.position.set(ax, ay, az)
+          sp.scale.setScalar(sc * 2.2)
+          sp.material.color.setRGB(1, 0.82, 0.5)
+          sp.material.opacity = 0.7
+        }
+        continue
+      }
       const isEmis = b.kind === BodyKind.Sun || b.hot
       if (isEmis && emisN < 600) {
         this.emis.setMatrixAt(emisN, this.m4)
@@ -677,15 +797,6 @@ void main(){
           ;(rm.material as THREE.MeshBasicMaterial).opacity = 0.85
         }
       }
-      // 성운·은하심 — 큰 연기 후광
-      if ((b.kind === BodyKind.Garden || b.kind === BodyKind.Core) && glowN < MAX_GLOW) {
-        const sp = this.glows[glowN++]!
-        sp.visible = true
-        sp.position.set(ax, ay, az)
-        sp.scale.setScalar(sc * 3.2)
-        sp.material.color.setRGB(b.cr * 0.5, b.cg * 0.45, b.cb * 0.6)
-        sp.material.opacity = 0.4
-      }
       // 먹이 금테 — 멀리서도 보여야 "먹을 게 있다"가 된다
       if (markN < MAX_MARK && b.r < R * 0.8 && b.r >= R * 0.1) {
         const dx = b.x - g.x
@@ -707,6 +818,32 @@ void main(){
     for (let i = glowN; i < MAX_GLOW; i++) this.glows[i]!.visible = false
     for (let i = markN; i < MAX_MARK; i++) this.marks[i]!.visible = false
     for (let i = ringN; i < this.rings.length; i++) this.rings[i]!.visible = false
+    for (let i = nebN; i < MAX_NEB; i++) this.nebSprites[i]!.visible = false
+
+    // 게 펄서 — 등대 빔 두 줄기가 자기축을 따라 쓸고 돈다 (게 성운의 심장)
+    if (pulsarSeen) {
+      const ang = t * 8
+      const tilt = 0.72
+      for (let i = 0; i < 2; i++) {
+        const s = i === 0 ? 1 : -1
+        const bm = this.pulsarBeams[i]!
+        bm.visible = true
+        this.v3.set(
+          Math.sin(tilt) * Math.cos(ang) * s,
+          Math.cos(tilt) * s,
+          Math.sin(tilt) * Math.sin(ang) * s,
+        )
+        this.s3.set(0, 1, 0)
+        bm.quaternion.setFromUnitVectors(this.s3, this.v3)
+        bm.position.set(pulsarX, pulsarY, pulsarZ)
+        const len = Math.max(900, pulsarR * 70)
+        bm.scale.set(len * 0.16, len, len * 0.16)
+        ;(bm.material as THREE.MeshBasicMaterial).opacity =
+          0.1 + 0.16 * Math.max(0, Math.sin(t * 24 + i * Math.PI))
+      }
+    } else {
+      for (const bm of this.pulsarBeams) bm.visible = false
+    }
 
     // 가스 — 구름·연기
     const gas = (g as unknown as { gas: { x: number; y: number; z: number; life: number; max: number; size: number; cr: number; cg: number; cb: number }[] }).gas

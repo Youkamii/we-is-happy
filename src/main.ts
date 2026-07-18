@@ -7,6 +7,7 @@
 import * as THREE from 'three'
 import { Audio } from './engine/audio'
 import { Input } from './engine/input'
+import { LY } from './game/starmap'
 import { STORE_KEY, Voyage, rankOf, type Store } from './game/voyage'
 import { Scene3D } from './render3d/scene3d'
 
@@ -133,7 +134,8 @@ function boot(): void {
     line('너는 지구 곁의, 티끌만 한 블랙홀이다', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
     line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다', 'font-size:14px;color:#ffb066;line-height:2')
     line('여긴 진짜 우주다 — 달부터. 그다음 행성. 그다음 태양.', 'font-size:14px;color:#8fa8c4;line-height:2')
-    line('카이퍼 벨트와 오르트 구름을 지나면, 프록시마까지는 한세월이다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
+    line('카이퍼 벨트와 오르트 구름을 지나면, 빈 우주에선 성간 순항이 붙는다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
+    line('나침반이 언제나 다음 별을 가리킨다 — 은하수는 넓고, 끝은 안드로메다 너머다', 'font-size:13px;color:#6f8299;line-height:2')
     line('이동 WASD · 상승 스페이스 · 하강 시프트', 'font-size:13px;color:#ffd9a8;line-height:2')
     line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
@@ -250,11 +252,20 @@ function boot(): void {
       arrow.style.opacity = '0'
     }
 
+    // 다음 항로 — 공허에서 게임이 안 끝났다고 말하는 줄
+    const lyd = game.routeDist / LY
+    const routeLine = game.routeName
+      ? `\n다음 항로  ${game.routeName} · ${lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(game.routeDist / 1000)}k`}` +
+        (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '')
+      : game.cruise > 1.5
+        ? `\n성간 순항 ×${game.cruise.toFixed(1)}`
+        : ''
     coords.textContent =
       `${rankOf(game.radius)}  ·  r${Math.round(game.radius)}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
       `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}` +
-      `${game.halo.length > 0 ? ` · 나의 은하 ${game.halo.length}성` : ''}\n` +
+      `${game.halo.length > 0 ? ` · 나의 은하 ${game.halo.length}성` : ''}` +
+      `${routeLine}\n` +
       `축(X 토글): 빨강 x · 파랑 y · 초록 z↑`
 
     input.endFrame()
