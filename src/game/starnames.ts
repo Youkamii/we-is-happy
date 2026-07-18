@@ -169,11 +169,30 @@ const CAT_LOGS: Record<RealCategory, readonly string[]> = {
     '두 번째 지구라 불리던 곳.',
   ],
   hole: ['나와 같은 것이었다. 이제 나다.'],
+  brown: [
+    '별이 되다 만 것. 식은 채로 떠돌고 있었다.',
+    '빛나기엔 작고, 행성이기엔 컸다.',
+  ],
+  interstellar: [
+    '다른 항성계에서 온 것이었다. 긴 여행이었겠지.',
+    '어느 별의 오르트 구름에서 떨어져 나왔을까.',
+  ],
 }
+
+/** 실존 갈색왜성 — 성간을 떠도는 식은 별들 */
+const BROWN_DWARFS = [
+  'WISE 0855', '루만 16', '글리제 229B', '테이데 1', 'OTS 44', 'SIMP 0136',
+  '2MASS 0939', 'WISE 1828',
+]
+
+/** 성간 방문자 — 태양계 밖에서 온 것들 (실존 + 그 뒤를 이을 것들) */
+const INTERSTELLAR = [
+  '오우무아무아', '보리소프 혜성', '이름 없는 성간 방문자', '떠도는 얼음',
+]
 
 export type RealCategory =
   | 'sunNear' | 'sunBright' | 'sunHyper' | 'nebula' | 'galaxy'
-  | 'comet' | 'asteroid' | 'planet' | 'hole'
+  | 'comet' | 'asteroid' | 'planet' | 'hole' | 'brown' | 'interstellar'
 
 const POOLS: Record<RealCategory, readonly string[]> = {
   sunNear: NEAR_STARS,
@@ -185,6 +204,8 @@ const POOLS: Record<RealCategory, readonly string[]> = {
   asteroid: ASTEROIDS,
   planet: EXOPLANETS,
   hole: BLACK_HOLES,
+  brown: BROWN_DWARFS,
+  interstellar: INTERSTELLAR,
 }
 
 /** 실명 뽑기 — 같은 id 는 언제나 같은 이름 (결정론 유지). */

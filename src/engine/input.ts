@@ -20,6 +20,8 @@ export class Input {
   private readonly canvas: HTMLCanvasElement
 
   readonly move: MoveVector = { x: 0, y: 0 }
+  /** 수직(z) 이동 — 스페이스 +1(상승) / 시프트 -1(하강). 키보드 전용, 터치는 수평 유지 */
+  lift = 0
   /** 이번 프레임에 새로 눌린 키 (엣지 검출) */
   private readonly pressed = new Set<string>()
   /** 이번 프레임에 새로 눌린 포인터 (엣지). 터치 재시작 등 키보드 없는 기기의 UI 용. */
@@ -95,6 +97,7 @@ export class Input {
     // 화면 좌표는 아래가 +y 지만 월드는 위가 +y 다. 여기서 한 번만 뒤집는다.
     if (k.has('w') || k.has('arrowup')) y += 1
     if (k.has('s') || k.has('arrowdown')) y -= 1
+    this.lift = (k.has(' ') ? 1 : 0) - (k.has('shift') ? 1 : 0)
 
     if (x === 0 && y === 0 && this.pointerActive) {
       let dx: number

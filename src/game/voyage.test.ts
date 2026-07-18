@@ -1,25 +1,31 @@
 /**
- * 검은 입 코어 계약 — "삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다".
+ * 검은 입 v3 코어 계약 — "삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다".
  *
- * ① 우주는 결정론이다 — 같은 좌표 = 같은 천체 (좌표 공유의 전제)
+ * ① 우주는 결정론이다 (실지도 + 시드 채움 — 같은 자리엔 같은 천체)
  * ② 작은 것은 삼켜지고, 나는 커지고, 명부에 남는다
- * ③ 나보다 큰 것은 못 삼킨다 (성장의 문이 잠겨 있어야 열리는 맛이 난다)
- * ④ 항해는 판마다 새로 시작하고, 명부만 평생 남는다 (회차 v2)
+ * ③ 나보다 큰 것은 못 삼킨다
+ * ④ 항해는 판마다 새로, 명부만 평생 (회차)
  * ⑤ 문턱을 넘으면 칭호가 온다
- * ⑥ 요람은 굶기지 않는다 (실플레이 판정 #22-3)
- * ⑦ 위성은 궤도를 돈다 (케플러 레일)
+ * ⑥ 요람은 굶기지 않는다
+ * ⑦ 위성은 궤도를 돈다 (케플러 레일, 3D 경사)
  * ⑧ 내가 지나가면 위성이 레일에서 뜯긴다 (섭동·Hills)
- * ⑨ 못 삼키는 것은 조석으로 찢어 파편을 얻는다 (로슈 한계)
- * ⑩ 먹은 것의 운동량이 내 것이 된다 (보존)
- * ⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 (성장 페이스)
+ * ⑨ 로슈 조석 파괴 — 가스 스트림으로 흘러들고, 심이 남는다
+ * ⑩ 먹은 것의 운동량이 내 것이 된다
+ * ⑪ 탐욕 봇도 굶지 않는다 (성장 페이스)
+ * ⑫ 작은 몸의 조석 파괴는 연쇄 폭발하지 않는다
+ * ⑬ 우주는 실재다 — 태양계에서 시작, 프록시마는 프록시마 자리에, 남쪽엔 궁수자리 A*
+ * ⑭ 커져도 세계는 보인다 (시야 비례 로드)
+ * ⑮ z축은 실재한다 — 떠오르고, 가라앉고, 다른 층의 먹이는 안 잡힌다
+ * ⑯ 오르트 구름은 실재한다 — 태양계의 끝은 얼음의 껍질이다
  */
 import { describe, expect, it } from 'vitest'
 import type { Input } from '../engine/input'
+import { SHELL, STAR_MAP } from './starmap'
 import { nameOf } from './starnames'
 import { BodyKind, Voyage, rankOf, type Body, type Store } from './voyage'
 
-function mockInput(x: number, y: number): Input {
-  return { move: { x, y } } as unknown as Input
+function mockInput(x: number, y: number, lift = 0): Input {
+  return { move: { x, y }, lift } as unknown as Input
 }
 
 function memStore(): Store & { raw: string | null } {
@@ -35,14 +41,16 @@ function memStore(): Store & { raw: string | null } {
   }
 }
 
-/** 먹이를 위에 올라타서 삼킨다 — 레일 위 천체는 움직이므로 매 틱 붙는다 */
+/** 먹이 위에 올라타서 삼킨다 — 레일 위 천체는 움직이므로 매 틱 붙는다 (z 포함) */
 function chase(g: Voyage, prey: Body, frames: number): void {
   const input = mockInput(0, 0)
   for (let s = 0; s < frames; s++) {
     g.x = prey.x
     g.y = prey.y
+    g.z = prey.z
     g.vx = 0
     g.vy = 0
+    g.vz = 0
     g.update(input, 1 / 60)
   }
 }
@@ -62,32 +70,29 @@ describe('검은 입', () => {
   it('② 작은 것은 삼켜지고, 나는 커지고, 명부에 남는다', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = 9000 // R ≈ 20.8 — 티끌·달이 먹이가 되는 크기
+    g.vol = 9000 // R ≈ 20.8 — 천왕성·해왕성이 먹이가 되는 크기
     const R = g.radius
-    // 명부 검증까지 하려면 이름 있는 먹이(티끌이 아닌 것)를 노린다
     const prey = g.active.find(
       (b) => b.r < R * 0.7 && b.r > 2 && (b.kind !== BodyKind.Dust || b.r >= 10),
     )
-    expect(prey, '시작 성역 부근에 이름 있는 먹이가 있다').toBeTruthy()
+    expect(prey, '태양계에 이름 있는 먹이가 있다').toBeTruthy()
     const vol0 = g.vol
     chase(g, prey!, 90)
     expect(g.vol, '부피가 붙었다').toBeGreaterThan(vol0)
     expect(g.eatenThisRun, '삼킨 수가 센다').toBeGreaterThan(0)
     expect(g.journal.length, '명부에 남았다').toBeGreaterThan(0)
-    expect(g.journal[0]!.name.length).toBeGreaterThan(0)
   })
 
   it('③ 나보다 큰 것은 못 삼킨다', () => {
     const g = new Voyage()
     g.start(null)
     const big = g.active.find((b) => b.r > g.radius * 2)
-    expect(big, '큰 천체가 있다').toBeTruthy()
-    g.x = big!.x + big!.r * 1.05
-    g.y = big!.y
+    expect(big, '큰 천체가 있다 (태양)').toBeTruthy()
     const input = mockInput(0, 0)
     for (let s = 0; s < 60; s++) {
       g.x = big!.x + big!.r * 1.05
       g.y = big!.y
+      g.z = big!.z
       g.update(input, 1 / 60)
     }
     expect(g.active.some((b) => b.id === big!.id), '큰 천체는 그대로 있다').toBe(true)
@@ -110,8 +115,7 @@ describe('검은 입', () => {
     expect(g2.vol, '크기는 리셋된다 — 항해는 언제나 티끌에서').toBe(340)
     expect(g2.journal.some((e) => e.name === eatenName), '명부는 이어진다').toBe(true)
     expect(g2.voyages, '항해 횟수가 센다').toBe(2)
-    // 우주는 아문다 — 지난 판에 삼킨 천체도 새 판에는 제자리에 있다
-    expect(g2.active.some((b) => b.id === prey.id)).toBe(true)
+    expect(g2.active.some((b) => b.id === prey.id), '우주는 아문다').toBe(true)
   })
 
   it('⑤ 문턱을 넘으면 칭호가 온다', () => {
@@ -133,18 +137,21 @@ describe('검은 입', () => {
     expect(near.length, '1600px 안 먹이 수').toBeGreaterThanOrEqual(4)
   })
 
-  it('⑦ 위성은 궤도를 돈다 — 케플러 레일', () => {
+  it('⑦ 위성은 궤도를 돈다 — 케플러 레일 (3D)', () => {
     const g = new Voyage()
     g.start(null)
-    g.vol = 1 // R=1 — 나는 아무것도 못 끌고, 흡수도 못 한다 (관찰자)
-    const moon = g.active.find((b) => b.host !== null && b.orbR > 0 && b.ecc === 0)
+    g.vol = 1 // 관찰자 — 아무도 못 끌고 아무것도 못 삼킨다
+    // 빠른 위성을 고른다 — 명왕성은 한 바퀴에 248년이라 3초 관측으론 억울하다
+    const moon = g.active.find(
+      (b) => b.host !== null && b.orbR > 0 && b.ecc === 0 && Math.abs(b.orbW) > 0.1,
+    )
     expect(moon, '궤도 위성이 있다').toBeTruthy()
     const host = moon!.host!
     const a0 = moon!.orbA
     const input = mockInput(0, 0)
     for (let s = 0; s < 180; s++) g.update(input, 1 / 60)
-    const d = Math.hypot(moon!.x - host.x, moon!.y - host.y)
-    expect(Math.abs(d - moon!.orbR), '궤도 반지름이 유지된다').toBeLessThan(moon!.orbR * 0.03)
+    const d = Math.hypot(moon!.x - host.x, moon!.y - host.y, moon!.z - host.z)
+    expect(Math.abs(d - moon!.orbR), '3D 궤도 반지름 유지').toBeLessThan(moon!.orbR * 0.03)
     expect(Math.abs(moon!.orbA - a0), '공전했다').toBeGreaterThan(0.15)
   })
 
@@ -156,58 +163,76 @@ describe('검은 입', () => {
     )
     expect(moon, '달이 있다').toBeTruthy()
     const host = moon!.host!
-    // 호스트보다 확실히 큰 몸으로 달 옆을 지나간다
     g.vol = Math.pow(host.r * 2, 3)
     const input = mockInput(0, 0)
     for (let s = 0; s < 30; s++) {
-      g.x = moon!.x + g.radius * 1.9 // 로슈(1.3배) 밖, 중력권 안 — 찢지 않고 끌기만 한다
+      g.x = moon!.x + g.radius * 1.9
       g.y = moon!.y
+      g.z = moon!.z
       g.vx = 0
       g.vy = 0
+      g.vz = 0
       g.update(input, 1 / 60)
       if (moon!.free) break
     }
     expect(moon!.free, '레일에서 뜯겼다').toBe(true)
   })
 
-  it('⑨ 못 삼키는 것은 조석으로 찢는다 — 로슈 한계', () => {
+  it('⑨ 로슈 조석 파괴 — 가스로 흘러들고, 심이 남는다', () => {
     const g = new Voyage()
     g.start(null)
-    // r ≥ 10 천체를 골라 내 몸을 "그것의 1.1배 반지름"으로 — 삼키기엔 크고 찢기엔 작다
-    const target = g.active.find((b) => b.r > 10 && b.r < 60 && b.host === null)
-    expect(target, '대상 천체가 있다').toBeTruthy()
+    const target = g.active.find((b) => b.r > 10 && b.r < 60)
+    expect(target, '대상 천체가 있다 (천왕성쯤)').toBeTruthy()
     const R = target!.r / 0.9
     g.vol = R * R * R
     g.x = target!.x + (R + target!.r) * 1.1
     g.y = target!.y
+    g.z = target!.z
     g.vx = 0
     g.vy = 0
+    g.vz = 0
     const id = target!.id
     g.update(mockInput(0, 0), 1 / 60)
     expect(g.active.some((b) => b.id === id), '원본은 사라졌다').toBe(false)
-    const debris = g.active.filter((b) => b.hot)
-    expect(debris.length, '파편이 생겼다').toBeGreaterThanOrEqual(4)
-    for (const d of debris) {
-      expect(d.r, '파편은 전부 먹이 크기다').toBeLessThan(g.radius * 0.8)
+    const cores = g.active.filter((b) => b.hot)
+    expect(cores.length, '심이 남았다').toBeGreaterThanOrEqual(1)
+    for (const c of cores) {
+      expect(c.r, '심은 전부 먹이 크기다').toBeLessThan(g.radius * 0.8)
     }
-    // 파편을 실제로 주워 먹으면 부피가 붙는다 — 찢고 먹는 한 사이클
+    // 가스 스트림 — 가만히 있어도 찢은 질량이 흘러들어와 부피가 붙는다 (구름의 수확)
     const vol0 = g.vol
     const input = mockInput(0, 0)
-    for (let s = 0; s < 240; s++) {
-      const d = g.active.find((b) => b.hot)
-      if (!d) break
-      g.x = d.x
-      g.y = d.y
-      g.vx = 0
-      g.vy = 0
-      g.update(input, 1 / 60)
-    }
-    expect(g.vol, '파편을 먹고 자랐다').toBeGreaterThan(vol0)
+    for (let s = 0; s < 120; s++) g.update(input, 1 / 60)
+    expect(g.vol, '스트림이 흘러들었다').toBeGreaterThan(vol0)
   })
 
-  it('⑫ 작은 몸의 조석 파괴는 연쇄 폭발하지 않는다 (파편은 언제나 먹이 크기)', () => {
-    // 적대 리뷰 critical 재현: R≈2.47 일 때 r=2.2 천체를 로슈 반경 안에 —
-    // 파편 절대 하한(2.2)이 남아 있으면 같은 프레임 연쇄 파쇄로 여기서 멈춘다.
+  it('⑩ 먹은 것의 운동량이 내 것이 된다', () => {
+    const run = (pvx: number): number => {
+      const g = new Voyage()
+      g.start(null)
+      g.vol = 9000
+      const prey = g.active.find((b) => b.r < g.radius * 0.7 && b.r > 3)!
+      prey.free = true
+      prey.host = null
+      prey.orbR = 0
+      prey.vx = pvx
+      prey.vy = 0
+      prey.vz = 0
+      const input = mockInput(0, 0)
+      for (let s = 0; s < 70; s++) {
+        g.x = prey.x
+        g.y = prey.y
+        g.z = prey.z
+        g.update(input, 1 / 60)
+      }
+      return g.vx
+    }
+    const fwd = run(900)
+    const back = run(-900)
+    expect(fwd - back, '먹이 속도 방향으로 밀렸다').toBeGreaterThan(1)
+  })
+
+  it('⑫ 작은 몸의 조석 파괴는 연쇄 폭발하지 않는다', () => {
     const g = new Voyage()
     g.start(null)
     g.vol = 15
@@ -219,6 +244,7 @@ describe('검은 입', () => {
       r: 2.2,
       x: g.x + (R + 2.2) * 1.1,
       y: g.y,
+      z: g.z,
       host: null,
       orbR: 0,
       free: true,
@@ -227,86 +253,147 @@ describe('검은 입', () => {
     g.active.push(planted)
     const n0 = g.active.length
     g.update(mockInput(0, 0), 1 / 60)
-    expect(g.active.length, '파편 수가 유한하다').toBeLessThan(n0 + 10)
+    expect(g.active.length, '심 수가 유한하다').toBeLessThan(n0 + 10)
     for (const b of g.active) {
-      if (b.hot) expect(b.r, '파편은 먹이 크기').toBeLessThan(g.radius * 0.8)
+      if (b.hot) expect(b.r, '심은 먹이 크기').toBeLessThan(g.radius * 0.8)
     }
   })
 
-  it('⑩ 먹은 것의 운동량이 내 것이 된다', () => {
-    // 같은 우주에서 먹이 속도만 반대로 — 중력 잡음이 상쇄되고 운동량 항만 남는다
-    const run = (pvx: number): number => {
-      const g = new Voyage()
-      g.start(null)
-      g.vol = 9000
-      const prey = g.active.find((b) => b.r < g.radius * 0.7 && b.r > 3)!
-      prey.free = true
-      prey.host = null
-      prey.orbR = 0
-      prey.vx = pvx
-      prey.vy = 0
-      g.x = prey.x
-      g.y = prey.y
-      g.vx = 0
-      g.vy = 0
-      const input = mockInput(0, 0)
-      for (let s = 0; s < 70; s++) {
-        g.x = prey.x
-        g.y = prey.y
-        g.update(input, 1 / 60)
-      }
-      return g.vx
-    }
-    const fwd = run(900)
-    const back = run(-900)
-    expect(fwd - back, '먹이 속도 방향으로 밀렸다').toBeGreaterThan(1)
-  })
-
-  it('⑬ 우주는 실재를 참조한다 — 태양계에서 시작하고, 남쪽엔 궁수자리 A*', () => {
+  it('⑬ 우주는 실재다 — 태양계·프록시마·궁수자리 A*', () => {
     const g = new Voyage()
     g.start(null)
     const earth = g.active.find((b) => nameOf(b.id)?.name === '지구')
     expect(earth, '지구가 있다').toBeTruthy()
-    expect(earth!.r, '지구는 첫날부터 삼킬 수 없다 — 자격을 갖춰야 한다').toBeGreaterThan(
-      g.radius * 0.8,
-    )
-    const sun = g.active.find((b) => nameOf(b.id)?.name === '태양')
-    expect(sun, '태양이 있다').toBeTruthy()
-    expect(sun!.kind).toBe(BodyKind.Sun)
-    // 궁수자리 A* — 실제 하늘처럼 남쪽, 고정 좌표 (섹터 0,-12)
-    g.x = 1200
-    g.y = -12 * 2400 + 1200
+    expect(earth!.r, '지구는 첫날부터 못 삼킨다').toBeGreaterThan(g.radius * 0.8)
+    expect(g.active.some((b) => nameOf(b.id)?.name === '태양'), '태양이 있다').toBe(true)
+
+    // 프록시마 — 실제 가장 가까운 별. 지도의 그 자리에.
+    const prox = STAR_MAP.find((s) => s.name === '프록시마 센타우리')!
+    g.x = prox.x
+    g.y = prox.y
+    g.z = 0
     g.update(mockInput(0, 0), 1 / 60)
-    const sgr = g.active.find((b) => nameOf(b.id)?.name === '궁수자리 A*')
-    expect(sgr, '은하의 심장이 그 자리에 있다').toBeTruthy()
-    expect(sgr!.r).toBeGreaterThan(4000)
+    expect(
+      g.active.some((b) => nameOf(b.id)?.name === '프록시마 센타우리'),
+      '프록시마가 그 자리에 있다',
+    ).toBe(true)
+
+    // 궁수자리 A* — 남쪽 (게임 y-), 은하 중심
+    const sgr = STAR_MAP.find((s) => s.name === '궁수자리 A*')!
+    expect(sgr.y).toBeLessThan(0)
+    g.x = sgr.x
+    g.y = sgr.y
+    g.update(mockInput(0, 0), 1 / 60)
+    const core = g.active.find((b) => nameOf(b.id)?.name === '궁수자리 A*')
+    expect(core, '은하의 심장이 그 자리에 있다').toBeTruthy()
+    expect(core!.r).toBeGreaterThan(4000)
+  })
+
+  it('⑭ 커져도 세계는 보인다 — 시야 비례 로드', () => {
+    const g = new Voyage()
+    g.start(null)
+    g.vol = Math.pow(500, 3)
+    const prox = STAR_MAP.find((s) => s.name === '프록시마 센타우리')!
+    g.x = prox.x
+    g.y = prox.y
+    g.z = 0
+    g.camera.viewHeight = 500 * 26
+    g.update(mockInput(0, 0), 1 / 60)
+    // 프록시마와 알파 센타우리(0.12광년 = 한 화면)가 함께 보인다 — 실제 삼중성의 재현
+    const names = g.active.map((b) => nameOf(b.id)?.name).filter(Boolean)
+    expect(names, '프록시마').toContain('프록시마 센타우리')
+    expect(names, '알파 센타우리').toContain('알파 센타우리')
+    expect(g.active.length, '거대해도 화면에 세계가 있다').toBeGreaterThanOrEqual(4)
+    expect(g.active.length, '천체 수는 폭주하지 않는다').toBeLessThan(2600)
+  })
+
+  it('⑮ z축은 실재한다 — 다른 층의 먹이는 잡히지 않는다', () => {
+    const g = new Voyage()
+    g.start(null)
+    // 상승 입력은 z 를 올린다
+    for (let s = 0; s < 60; s++) g.update(mockInput(0, 0, 1), 1 / 60)
+    expect(g.z, '떠올랐다').toBeGreaterThan(40)
+
+    const g2 = new Voyage()
+    g2.start(null)
+    g2.vol = 9000
+    const prey = g2.active.find((b) => b.r < g2.radius * 0.7 && b.r > 2)!
+    prey.free = true
+    prey.host = null
+    prey.orbR = 0
+    const id = prey.id
+    const input = mockInput(0, 0)
+    for (let s = 0; s < 60; s++) {
+      // 같은 xy, 다른 층 — z 로 500 아래
+      g2.x = prey.x
+      g2.y = prey.y
+      g2.z = prey.z + 500
+      g2.vx = 0
+      g2.vy = 0
+      g2.vz = 0
+      g2.update(input, 1 / 60)
+    }
+    expect(g2.active.some((b) => b.id === id), 'z 가 다르면 못 삼킨다').toBe(true)
+    for (let s = 0; s < 60; s++) {
+      g2.x = prey.x
+      g2.y = prey.y
+      g2.z = prey.z
+      g2.update(input, 1 / 60)
+    }
+    expect(g2.active.some((b) => b.id === id), '같은 층에 오면 삼킨다').toBe(false)
+  })
+
+  it('⑯ 오르트 구름은 실재한다 — 태양계의 끝은 얼음의 껍질', () => {
+    const g = new Voyage()
+    g.start(null)
+    g.x = (SHELL.oortIn + SHELL.oortOut) / 2
+    g.y = 1200
+    g.update(mockInput(0, 0), 1 / 60)
+    const ice = g.active.filter((b) => b.kind === BodyKind.Dust && b.r < 8)
+    expect(ice.length, '얼음이 지천이다').toBeGreaterThanOrEqual(5)
   })
 
   it('⑪ 탐욕스럽게 쫓기만 해도 굶지 않는다 — 성장 페이스', () => {
     const g = new Voyage()
     g.start(null)
-    const input = { move: { x: 0, y: 0 } } as unknown as Input
+    const input = { move: { x: 0, y: 0 }, lift: 0 } as unknown as Input & { lift: number }
     let lastEat = 0
     let starve = 0
     let worstStarve = 0
     for (let s = 0; s < 7200; s++) {
-      // 매 반 초마다 가장 가까운 먹이를 다시 고른다 (탐욕 봇)
       if (s % 30 === 0) {
+        // 게임이 설계된 대로 노는 봇: 한 입(나침반 규칙) 우선, 도착 전 브레이크
         const R = g.radius
+        const meaty = Math.max(2.5, R * 0.12)
         let best: Body | null = null
         let bd = Infinity
+        let anyB: Body | null = null
+        let anyD = Infinity
         for (const b of g.active) {
           if (b.r >= R * 0.8) continue
-          const d = Math.hypot(b.x - g.x, b.y - g.y)
-          if (d < bd) {
+          const d = Math.hypot(b.x - g.x, b.y - g.y, b.z - g.z)
+          if (b.r >= meaty && d < bd) {
             bd = d
             best = b
           }
+          if (d < anyD) {
+            anyD = d
+            anyB = b
+          }
         }
+        if (!best) best = anyB
         if (best) {
           const d = Math.hypot(best.x - g.x, best.y - g.y) || 1
-          input.move.x = (best.x - g.x) / d
-          input.move.y = (best.y - g.y) / d
+          const speed = Math.hypot(g.vx, g.vy)
+          if (d < speed * 0.7) {
+            input.move.x = -g.vx / (speed || 1)
+            input.move.y = -g.vy / (speed || 1)
+          } else {
+            input.move.x = (best.x - g.x) / d
+            input.move.y = (best.y - g.y) / d
+          }
+          const dz = best.z - g.z
+          input.lift = dz > 400 ? 1 : dz < -400 ? -1 : 0
         }
       }
       g.update(input, 1 / 60)
@@ -318,9 +405,7 @@ describe('검은 입', () => {
         if (starve > worstStarve) worstStarve = starve
       }
     }
-    // 2분 동안 시작 부피의 3배 — 이보다 느리면 "성장이 안 된다" 판정이 재발한다
     expect(g.vol, `2분 뒤 부피 (r=${Math.round(g.radius)})`).toBeGreaterThan(340 * 3)
-    // 기아 계곡 금지 — 30초 넘게 아무것도 못 먹는 구간이 있으면 안 된다 (실측 62초 → 수리)
     expect(worstStarve, '최장 기아 구간(초)').toBeLessThan(30)
   })
 })

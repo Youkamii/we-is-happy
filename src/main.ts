@@ -128,12 +128,12 @@ function boot(): void {
       center.appendChild(d)
     }
     line('검은 입', 'font-size:56px;letter-spacing:.5em;color:#ffd9a8')
-    line('너는 티끌만 한 블랙홀이다', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
+    line('너는 지구 곁의, 티끌만 한 블랙홀이다', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
     line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다', 'font-size:14px;color:#ffb066;line-height:2')
-    line('네가 지나가면 달이 뜯기고, 행성이 흩어지고, 시공이 휜다', 'font-size:14px;color:#8fa8c4;line-height:2')
-    line('삼키기엔 큰 것은 — 바짝 붙어 조석으로 찢어라', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
-    line('너와 같은 것들도 있다 — 너보다 크면 조심하라', 'font-size:13px;color:#6f8299;line-height:2')
-    line('이동 WASD · 마우스 홀드 · 터치  |  J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
+    line('여긴 진짜 우주다 — 달부터. 그다음 행성. 그다음 태양.', 'font-size:14px;color:#8fa8c4;line-height:2')
+    line('카이퍼 벨트와 오르트 구름을 지나면, 프록시마까지는 한세월이다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
+    line('삼키기엔 큰 것은 바짝 붙어 조석으로 찢어라 — 가스가 되어 흘러들어온다', 'font-size:13px;color:#6f8299;line-height:2')
+    line('이동 WASD·마우스·터치 | 상승 스페이스 · 하강 시프트 | J 명부 · M 소리', 'font-size:13px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
@@ -203,7 +203,8 @@ function boot(): void {
 
     coords.textContent =
       `${rankOf(game.radius)}  ·  r${Math.round(game.radius)}\n` +
-      `(${Math.round(game.x)}, ${Math.round(game.y)})  ·  이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}`
+      `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
+      `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}`
 
     input.endFrame()
     requestAnimationFrame(frame)
