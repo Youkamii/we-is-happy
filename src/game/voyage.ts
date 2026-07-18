@@ -811,7 +811,7 @@ export class Voyage {
         const reach = edibleB ? R * 14 + 300 + R * 2 : R * 14
         if (d < reach) {
           let g = Math.min(PULL_CAP_BY_ME, (R * R * GRAV * MAW_PULL) / d2)
-          if (edibleB) g = Math.min(PULL_CAP_BY_ME, g + 70 * (1 + R / 150))
+          if (edibleB) g = Math.min(PULL_CAP_BY_ME, g + 160 * (1 + R / 120))
           if (!b.free && b.orbR > 0) {
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
             if (g > bind * DETACH) b.free = true // 섭동 — 레일에서 뜯긴다 (Hills)
@@ -832,8 +832,8 @@ export class Voyage {
             if (edibleB) {
               // 원반 평면화 — 먹이의 z 는 내 평면으로 스프링-감쇠 수렴한다.
               // z 정밀 정렬을 조작에 맡기면 지옥이 된다 (계측: 봇 z 진동 ±760).
-              b.vz += dz * 2.6 * step
-              b.vz *= Math.exp(-2.0 * step)
+              b.vz += dz * 5 * step
+              b.vz *= Math.exp(-3 * step)
             }
             // 원반화 점성 — 반경 방향 속도만 죽인다. 궤도 회전은 남고,
             // z 는 내 적도면으로 가라앉는다: 원반은 그렇게 생긴다.
@@ -974,13 +974,12 @@ export class Voyage {
       }
     }
     if (this.absorbs.length < 8) {
-      // 입은 구(球)가 아니라 원반이다 — 강착은 적도면에서 일어난다. z 는 0.4 로
-      // 눌러서 판정한다: 아니면 z 정렬 지옥이 온다 (계측: 봇이 2분에 1끼).
-      const ZK = 0.4
+      // 입은 구(球)가 아니라 두툼한 원반이다 — 수직은 내 지름(2R)까지 공짜,
+      // 그 밖은 절반 무게. 입 반경 R×3.2: 순항하며 스쳐도 먹혀야 게임이다
+      // (호버링 봇만 먹고 사람은 못 먹던 원인).
       const sx = this.x - prevX
       const sy = this.y - prevY
-      const sz = (this.z - prevZ) * ZK
-      const segL2 = sx * sx + sy * sy + sz * sz
+      const segL2 = sx * sx + sy * sy
       outer: for (const b of this.active) {
         if (this.absorbs.length >= 8) break
         if (b.r >= R * EDIBLE || this.eaten.has(b.id)) continue
@@ -989,12 +988,14 @@ export class Voyage {
         }
         const wx = b.x - prevX
         const wy = b.y - prevY
-        const wz = (b.z - prevZ) * ZK
-        const tt = segL2 > 0 ? Math.max(0, Math.min(1, (wx * sx + wy * sy + wz * sz) / segL2)) : 0
-        const d = Math.hypot(prevX + sx * tt - b.x, prevY + sy * tt - b.y, (prevZ + sz / ZK * tt - b.z) * ZK)
+        const tt = segL2 > 0 ? Math.max(0, Math.min(1, (wx * sx + wy * sy) / segL2)) : 0
+        const dxy = Math.hypot(prevX + sx * tt - b.x, prevY + sy * tt - b.y)
+        const zc = prevZ + (this.z - prevZ) * tt - b.z
+        const dzEff = Math.max(0, Math.abs(zc) - R * 2) * 0.5
+        const d = Math.hypot(dxy, dzEff)
         const relV = Math.hypot(b.vx - this.vx, b.vy - this.vy, b.vz - this.vz)
-        if (d < R * 1.7 + b.r + relV * step) {
-          this.absorbs.push({ b, t: 0, dur: 0.42 + Math.min(0.5, (b.r / R) * 0.55) })
+        if (d < R * 3.2 + b.r + relV * step) {
+          this.absorbs.push({ b, t: 0, dur: 0.3 + Math.min(0.5, (b.r / R) * 0.55) })
         }
       }
     }
