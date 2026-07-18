@@ -970,22 +970,33 @@ export class Voyage {
     // 지도 감속 — 감지(nearAny)는 로드 반경(≤~17k px)에 묶이는데 제동거리는
     // R·속도 비례라 거대한 몸은 목적지를 관통한다 (적대 리뷰: R700 관통 확정).
     // 지도 항성계·태양계 거리는 로드와 무관하니 이걸로 미리 브레이크를 밟는다.
-    let mapNear = Math.hypot(800 - this.x, 800 - this.y, this.z) - SHELL.oortIn
+    // mapNear 는 **진행 방향 앞의 것만** 센다 — 뒤의 태양계가 상한을 잡으면
+    // 이웃 별 몇 광년 여행이 출발부터 기어간다 ("몇 광년 가는 게 너무 오래
+    // 걸려": 실플레이). 저속(순항 전)일 땐 전방위.
+    const spNow = Math.hypot(this.vx, this.vy, this.vz)
+    const dirX = spNow > 1 ? this.vx / spNow : 0
+    const dirY = spNow > 1 ? this.vy / spNow : 0
+    const ahead = (bx: number, by: number): boolean =>
+      spNow < base * 2 || (bx - this.x) * dirX + (by - this.y) * dirY > 0
+    let mapNear = ahead(800, 800)
+      ? Math.hypot(800 - this.x, 800 - this.y, this.z) - SHELL.oortIn
+      : Infinity
     for (const s of STAR_MAP) {
+      if (!ahead(s.x, s.y)) continue
       const dm = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z) - s.r
       if (dm < mapNear) mapNear = dm
     }
-    const spNow = Math.hypot(this.vx, this.vy, this.vz)
+    if (mapNear === Infinity) mapNear = 1e9
     // 게이트는 둘뿐: 의미 있는 천체(내 30%+)가 2.5화면 안에 있는가 + 지도 제동.
     // preyDist(잔부스러기 폴백 포함)를 게이트에 넣으면 성간의 상수 밀도 잔챙이가
     // 거대 R 의 문턱 안에 언제나 있어 순항이 죽는다 (계측 0~5%). 잔챙이·한입거리는
     // 순항을 막을 자격이 없다 — 지나가며 입이 쓸어담는다.
     const empty = this.nearAny > base * 2.5 && mapNear > spNow * 1.4 + base * 8
-    const ck = empty && this.thrusting ? 0.45 : 4.5
+    const ck = empty && this.thrusting ? 0.7 : 4.5
     this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
     // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
     const acc = thrustAcc(R) * this.cruise +
-      (this.cruise > 3 ? Math.min(300000, mapNear * 0.03) : 0)
+      (this.cruise > 3 ? Math.min(400000, mapNear * 0.06) : 0)
     if (this.thrusting) {
       const ml = Math.hypot(mx, my) || 1
       if (mx !== 0 || my !== 0) {
@@ -1173,7 +1184,7 @@ export class Voyage {
     // ×6 고정으론 게 성운(11M px)이 32분이다 ("한번 가는데 30분": 실플레이).
     // 접근하면 mapNear 가 줄며 자동 감속 — 도착 브레이크가 공짜로 따라온다.
     const vmax = base * 1.6 * Math.max(1, this.cruise) +
-      (this.cruise > 1.5 ? Math.min(900000, mapNear * 0.08) : 0)
+      (this.cruise > 1.5 ? Math.min(900000, mapNear * 0.14) : 0)
     const sp0 = Math.hypot(this.vx, this.vy, this.vz)
     if (sp0 > vmax) {
       const k = vmax / sp0
