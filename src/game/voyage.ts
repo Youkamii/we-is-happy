@@ -676,7 +676,7 @@ export class Voyage {
   /** 이 섹터의 결정론 라이벌 — 성간부터 나타난다. 요람은 안전해야 한다. */
   private sectorRival(sx: number, sy: number): Rival | null {
     const rC = Math.hypot((sx + 0.5) * SECTOR, (sy + 0.5) * SECTOR)
-    if (rC < SHELL.oortIn) return null
+    if (rC < SHELL.kuiperOut) return null // 요람·행성계는 안전, 카이퍼부터 사냥터
     const seed = hashSeed(`${UNIVERSE_SEED}:rv:${sx}:${sy}`)
     const rng = new Rng(seed)
     if (rng.next() >= 0.16) return null

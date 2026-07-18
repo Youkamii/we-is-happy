@@ -36,14 +36,14 @@ void main(){
   vec2 p = vUv - uHole; p.x *= uAspect;
   float d = length(p);
   vec2 dir = d > 1e-4 ? p / d : vec2(0.0,1.0);
-  float defl = (uR*uR*2.3) / max(d - uR*0.3, uR*0.4);
+  float defl = (uR*uR*1.6) / max(d - uR*0.3, uR*0.4);
   vec2 uv = vUv + vec2(dir.x/uAspect, dir.y) * defl;
   vec3 col = texture2D(tDiffuse, uv).rgb;
   // 사건의 지평선 — 렌즈 다음에 깎아야 진짜 검다
   col = mix(col, vec3(0.0), smoothstep(uR*1.02, uR*0.88, d));
   // 광자 고리
   float ring = exp(-abs(d - uR*1.06)/(uR*0.05));
-  col += vec3(1.4,1.05,0.6) * ring * 0.7;
+  col += vec3(1.4,1.05,0.6) * ring * 0.5;
   gl_FragColor = vec4(col, 1.0);
 }`,
 }
@@ -126,6 +126,7 @@ export class Scene3D {
   private readonly sun: THREE.DirectionalLight
   private readonly rivalMeshes: THREE.Mesh[] = []
   private readonly rivalGlow: THREE.Sprite[] = []
+  private readonly rivalRing: THREE.Sprite[] = []
 
   private readonly ecliptic: THREE.PolarGridHelper
   /** 랜드마크 — 실지도 항성계는 아무리 멀어도 밝은 별점으로 보인다 (항법의 잣대) */
@@ -150,7 +151,7 @@ export class Scene3D {
     this.camera = new THREE.PerspectiveCamera(58, 1.77, 1, 400000)
 
     // 우주는 칠흑이지만 게임은 보여야 한다 — 은은한 전역광 + 반대편 보조광
-    this.scene.add(new THREE.AmbientLight(0x9aa8c8, 0.85))
+    this.scene.add(new THREE.AmbientLight(0x9aa8c8, 1.25))
     this.sun = new THREE.DirectionalLight(0xfff2dd, 1.4)
     this.scene.add(this.sun)
     const fill = new THREE.DirectionalLight(0x6677aa, 0.4)
@@ -162,7 +163,7 @@ export class Scene3D {
 
     const sphere = new THREE.SphereGeometry(1, 20, 14)
     const litMat = new THREE.MeshLambertMaterial()
-    litMat.emissive = new THREE.Color(0x101623) // 완전 검정으로는 안 떨어진다
+    litMat.emissive = new THREE.Color(0x1c2436) // 완전 검정으로는 안 떨어진다
     this.lit = new THREE.InstancedMesh(sphere, litMat, MAX_INST)
     this.lit.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.lit)
@@ -268,6 +269,13 @@ export class Scene3D {
       sp.visible = false
       this.rivalGlow.push(sp)
       this.scene.add(sp)
+      // 광자 고리 — 다른 검은 입도 검은 구멍답게 빛의 테를 두른다 (스텔스 금지)
+      const ring = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+      }))
+      ring.visible = false
+      this.rivalRing.push(ring)
+      this.scene.add(ring)
     }
 
     // 랜드마크 별점 + 이름 라벨
@@ -296,7 +304,7 @@ export class Scene3D {
 
     this.composer = new EffectComposer(this.renderer)
     this.composer.addPass(new RenderPass(this.scene, this.camera))
-    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.55, 0.7, 0.82)
+    const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.75, 0.7, 0.78)
     this.composer.addPass(bloom)
     this.lensPass = new ShaderPass(LENS_SHADER)
     this.composer.addPass(this.lensPass)
@@ -356,8 +364,8 @@ export class Scene3D {
     const py = g.z // three y = 게임 z (위)
     const pz = g.y
 
-    // 카메라 — 뒤에서 비스듬히, 내가 화면에서 점이 되지 않을 만큼 가깝게
-    const dist = g.camera.viewHeight * 0.58 * this.zoomBias
+    // 카메라 — 내가 보이되 세계를 가리지 않는 거리
+    const dist = g.camera.viewHeight * 0.78 * this.zoomBias
     const cp = Math.cos(this.pitch)
     this.camera.position.set(
       px + Math.sin(this.yaw) * cp * dist,
@@ -368,7 +376,7 @@ export class Scene3D {
     this.camera.far = dist * 60
     this.camera.near = Math.max(0.5, dist * 0.002)
     this.camera.updateProjectionMatrix()
-    if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.9 / (dist * 18)
+    if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.5 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
     // 기준면은 황도(z=0)에 고정 — 내가 뜨고 가라앉는 게 이 면을 잣대로 읽힌다
@@ -536,22 +544,29 @@ export class Scene3D {
     for (let i = 0; i < this.rivalMeshes.length; i++) {
       const m = this.rivalMeshes[i]!
       const sp = this.rivalGlow[i]!
+      const rg = this.rivalRing[i]!
       const rv = g.rivals[i]
       if (!rv) {
         m.visible = false
         sp.visible = false
+        rg.visible = false
         continue
       }
       const rr = Math.cbrt(rv.vol)
       m.visible = true
       m.position.set(rv.x, rv.z, rv.y)
       m.scale.setScalar(rr)
+      const threat = rr > R
       sp.visible = true
       sp.position.copy(m.position)
-      sp.scale.setScalar(rr * 3.4)
-      const threat = rr > R
-      sp.material.color.setRGB(threat ? 1.2 : 0.5, threat ? 0.25 : 0.5, threat ? 0.2 : 0.55)
-      sp.material.opacity = 0.5
+      sp.scale.setScalar(Math.max(rr * 4.5, dist * 0.03))
+      sp.material.color.setRGB(threat ? 1.6 : 0.7, threat ? 0.3 : 0.65, threat ? 0.22 : 0.75)
+      sp.material.opacity = 0.85
+      rg.visible = true
+      rg.position.copy(m.position)
+      rg.scale.setScalar(rr * 1.9)
+      rg.material.color.setRGB(1.6, 1.2, 0.7)
+      rg.material.opacity = 0.9
     }
 
     // 은하 — 내가 거느린 별들. 내가 움직이면 은하째 따라온다
@@ -583,7 +598,7 @@ export class Scene3D {
     this.disk.position.set(px, py, pz)
     this.disk.scale.setScalar(R)
     this.disk.rotation.z = t * 0.5
-    ;(this.disk.material as THREE.MeshBasicMaterial).opacity = 0.3 + g.feed * 0.55
+    ;(this.disk.material as THREE.MeshBasicMaterial).opacity = 0.22 + g.feed * 0.5
 
     // 렌즈 — 내 화면 위치와 화면 반지름
     this.v3.set(px, py, pz).project(this.camera)
@@ -591,8 +606,8 @@ export class Scene3D {
     const h = Math.max(1, this.renderer.domElement.clientHeight)
     this.lensPass.uniforms['uHole']!.value.set((this.v3.x + 1) / 2, (this.v3.y + 1) / 2)
     const rScreen = R / (Math.tan((this.camera.fov * Math.PI) / 360) * dist * 2)
-    // 렌즈는 내 존재 증명이다 — 작아도 보이게 바닥값을 두고 살짝 부풀린다
-    this.lensPass.uniforms['uR']!.value = Math.max(0.03, rScreen * 1.35)
+    // 렌즈는 존재 증명이되 화면을 먹으면 안 된다 — 실크기 기준, 바닥만 살짝
+    this.lensPass.uniforms['uR']!.value = Math.max(0.013, rScreen)
     this.lensPass.uniforms['uAspect']!.value = w / h
   }
 
