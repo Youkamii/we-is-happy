@@ -129,7 +129,7 @@ function boot(): void {
     line('카이퍼 벨트와 오르트 구름을 지나면, 빈 우주에선 성간 순항이 붙는다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
     line('나침반이 언제나 다음 별을 가리킨다 — 은하수는 넓고, 끝은 안드로메다 너머다', 'font-size:13px;color:#6f8299;line-height:2')
     line('이동 WASD · 상승 스페이스 · 하강 시프트', 'font-size:13px;color:#ffd9a8;line-height:2')
-    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부', 'font-size:13px;color:#6f8299;line-height:2')
+    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · N 자동 항법(먹으며 항로 추적)', 'font-size:13px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
@@ -141,6 +141,27 @@ function boot(): void {
   showTitle()
 
   const wrapped = { move: { x: 0, y: 0 }, lift: 0 } as unknown as Input
+  // 자동 항법 — 나침반이 가리키는 것(먹이 우선, 없으면 다음 항로)을 추적하며
+  // 먹고 이동한다. 수동 입력이 오면 즉시 해제 ("주변거 잡아먹으면서 목적지로").
+  let autoNav = false
+  const autoSteer = (): void => {
+    const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
+    const dx = game.preyX - game.x
+    const dy = game.preyY - game.y
+    const d = Math.hypot(dx, dy) || 1
+    const sp = Math.hypot(game.vx, game.vy)
+    if (d < sp * 0.7 && sp > 1) {
+      // 도착 브레이크 — 지나치기 전에 역추진 (봇 검증 로직)
+      w.move.x = -game.vx / sp
+      w.move.y = -game.vy / sp
+    } else {
+      w.move.x = dx / d
+      w.move.y = dy / d
+    }
+    const dz = game.preyZ - game.z
+    const zBand = Math.max(300, d * 0.2)
+    w.lift = dz > zBand ? 1 : dz < -zBand ? -1 : 0
+  }
   const steer = (): void => {
     // 이동은 WASD(카메라 기준)·스페이스·시프트, 마우스 왼쪽은 시점 회전 전용
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
@@ -181,9 +202,12 @@ function boot(): void {
       if (journalOpen) renderJournal()
     }
     if (input.consumePressed('x')) scene.axes.visible = !scene.axes.visible
+    if (input.consumePressed('n')) autoNav = !autoNav
+    if (autoNav && (input.move.x !== 0 || input.move.y !== 0 || input.lift !== 0)) autoNav = false
 
     if (!journalOpen) {
-      steer()
+      if (autoNav && game.preyDist < Infinity) autoSteer()
+      else steer()
       game.update(wrapped, dt)
     }
     scene.resize()
@@ -243,12 +267,11 @@ function boot(): void {
 
     // 다음 항로 — 공허에서 게임이 안 끝났다고 말하는 줄
     const lyd = game.routeDist / LY
+    const navTag = autoNav ? '  ·  자동 항법(N 해제)' : ''
     const routeLine = game.routeName
       ? `\n다음 항로  ${game.routeName} · ${lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(game.routeDist / 1000)}k`}` +
-        (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '')
-      : game.cruise > 1.5
-        ? `\n성간 순항 ×${game.cruise.toFixed(1)}`
-        : ''
+        (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '') + navTag
+      : (game.cruise > 1.5 ? `\n성간 순항 ×${game.cruise.toFixed(1)}${navTag}` : navTag ? `\n${navTag.trim()}` : '')
     // 성장은 반지름이 아니라 질량이다 — 블랙홀은 지구를 먹어도 몸이 9mm 큰다
     const mE = game.vol / 779
     const mass = mE >= 936

@@ -955,7 +955,9 @@ export class Voyage {
     const empty = this.nearAny > base * 2.5 && mapNear > spNow * 1.4 + base * 8
     const ck = empty && this.thrusting ? 0.45 : 4.5
     this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
-    const acc = thrustAcc(R) * this.cruise
+    // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
+    const acc = thrustAcc(R) * this.cruise +
+      (this.cruise > 3 ? Math.min(300000, mapNear * 0.03) : 0)
     if (this.thrusting) {
       const ml = Math.hypot(mx, my) || 1
       if (mx !== 0 || my !== 0) {
@@ -1139,8 +1141,11 @@ export class Voyage {
     }
 
     // 속도 상한 — 화면 1.6장/초 (순항 중엔 순항 배율만큼 열린다).
-    // 없으면 거대 스케일에서 섹터 생성 폭주 (프리즈).
-    const vmax = base * 1.6 * Math.max(1, this.cruise)
+    // 성간 심공에선 **남은 지도 거리에 비례**해 더 열린다 (SpaceEngine 방식):
+    // ×6 고정으론 게 성운(11M px)이 32분이다 ("한번 가는데 30분": 실플레이).
+    // 접근하면 mapNear 가 줄며 자동 감속 — 도착 브레이크가 공짜로 따라온다.
+    const vmax = base * 1.6 * Math.max(1, this.cruise) +
+      (this.cruise > 1.5 ? Math.min(900000, mapNear * 0.08) : 0)
     const sp0 = Math.hypot(this.vx, this.vy, this.vz)
     if (sp0 > vmax) {
       const k = vmax / sp0
@@ -1624,9 +1629,12 @@ export class Voyage {
     if (this.dirty && this.persistCd <= 0) this.persist()
 
     // 카메라 — 줌아웃이 곧 성장. 속도 확폭도 화면 눈금 비례.
+    // 커지는 방향은 4초에 걸쳐 천천히(성장이 화면 사건이 되도록 — 재미 합성 1위
+    // "꿀꺽 펀치"), 줄어드는 방향(브레이크 줌인)은 즉답.
     const speed = Math.hypot(this.vx, this.vy)
     const targetView = base + Math.min(1, speed / (base * 0.74)) * base * 0.95
-    this.camera.viewHeight += (targetView - this.camera.viewHeight) * (1 - Math.exp(-1.3 * dt))
+    const easeK = targetView > this.camera.viewHeight ? 0.35 : 1.3
+    this.camera.viewHeight += (targetView - this.camera.viewHeight) * (1 - Math.exp(-easeK * dt))
     this.camera.follow(this.x + this.vx * 0.3, this.y + this.vy * 0.3, dt, 3.4)
     this.camera.update(dt)
   }

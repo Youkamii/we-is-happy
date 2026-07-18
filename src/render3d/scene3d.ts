@@ -669,6 +669,16 @@ void main(){
           break
         }
       }
+      // 지각 계층 — 큰 천체는 최소 각크기를 보장한다: 멀어도 태양은 불덩이,
+      // 행성은 구체다 ("ㅈ만해지고 희무끄레한 이상한 형태": 실플레이). 다가가면
+      // 실크기가 자연히 이긴다 (원근 거짓말은 낮은 θ 로 억제).
+      if (b.r >= R * 1.25 && redK === 0) {
+        const dCam = Math.hypot(
+          ax - this.camera.position.x, ay - this.camera.position.y, az - this.camera.position.z,
+        )
+        const theta = b.kind === BodyKind.Sun ? 0.045 : b.kind === BodyKind.Garden || b.kind === BodyKind.Core ? 0.06 : 0.022
+        sc = Math.max(sc, dCam * theta)
+      }
       this.v3.set(ax, ay, az)
       this.s3.setScalar(Math.max(0.6, sc))
       this.m4.compose(this.v3, this.q0, this.s3)
