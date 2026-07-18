@@ -99,28 +99,14 @@ export class Input {
     if (k.has('s') || k.has('arrowdown')) y -= 1
     this.lift = (k.has(' ') ? 1 : 0) - (k.has('shift') ? 1 : 0)
 
-    if (x === 0 && y === 0 && this.pointerActive) {
-      let dx: number
-      let dy: number
-      if (this.touchMode) {
-        // 터치: 처음 짚은 곳이 원점인 가상 스틱
-        dx = this.pointerX - this.touchOriginX
-        dy = this.pointerY - this.touchOriginY
-        const dead = 12
-        const len = Math.hypot(dx, dy)
-        if (len < dead) {
-          dx = 0
-          dy = 0
-        }
-      } else {
-        // 마우스: 화면 중앙(=플레이어)에서 커서 쪽으로
-        const r = this.canvas.getBoundingClientRect()
-        dx = this.pointerX - (r.left + r.width * 0.5)
-        dy = this.pointerY - (r.top + r.height * 0.5)
-        if (Math.hypot(dx, dy) < 18) {
-          dx = 0
-          dy = 0
-        }
+    // 마우스는 이제 시점 전용(3D) — 이동 벡터는 터치 가상 스틱만 만든다
+    if (x === 0 && y === 0 && this.pointerActive && this.touchMode) {
+      let dx = this.pointerX - this.touchOriginX
+      let dy = this.pointerY - this.touchOriginY
+      const dead = 12
+      if (Math.hypot(dx, dy) < dead) {
+        dx = 0
+        dy = 0
       }
       x = dx
       y = -dy

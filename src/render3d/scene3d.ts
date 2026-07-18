@@ -245,9 +245,9 @@ export class Scene3D {
     this.lensPass = new ShaderPass(LENS_SHADER)
     this.composer.addPass(this.lensPass)
 
-    // 카메라 조작 — 오른쪽 드래그 회전, 휠 줌
+    // 카메라 조작 — 왼쪽 드래그 회전, 휠 줌. 오른쪽 버튼은 아무것도 하지 않는다.
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.button === 2) {
+      if (e.button === 0 && e.pointerType !== 'touch') {
         const startX = e.clientX
         const startY = e.clientY
         const y0 = this.yaw
