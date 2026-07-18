@@ -264,7 +264,8 @@ export class Scene3D {
         const p0 = this.pitch
         const move = (ev: PointerEvent): void => {
           this.yaw = y0 + (ev.clientX - startX) * 0.006
-          this.pitch = Math.min(1.35, Math.max(0.12, p0 + (ev.clientY - startY) * 0.005))
+          // 아래(-)로도 내려간다 — 위를 올려다볼 수 있어야 3D 다 (실플레이)
+          this.pitch = Math.min(1.35, Math.max(-1.35, p0 + (ev.clientY - startY) * 0.005))
         }
         const up = (): void => {
           window.removeEventListener('pointermove', move)
