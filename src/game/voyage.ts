@@ -905,7 +905,10 @@ export class Voyage {
             const ux = dx / d
             const uy = dy / d
             const uz = dz / d
-            const vr = (rvx * ux + rvy * uy + rvz * uz) * Math.exp(-step * 5 * prox)
+            // 점성은 **탈출만** 죽인다 — 접근 속도까지 죽이면 내가 다가갈 때
+            // 먹이가 뱃머리 파도처럼 밀려간다 ("가까이 가면 멀어져": 실플레이)
+            const vr0 = rvx * ux + rvy * uy + rvz * uz
+            const vr = vr0 > 0 ? vr0 : vr0 * Math.exp(-step * 5 * prox)
             const kt = Math.exp(-step * 0.7 * prox * prox)
             let tx = (rvx - (rvx * ux + rvy * uy + rvz * uz) * ux) * kt
             let ty = (rvy - (rvx * ux + rvy * uy + rvz * uz) * uy) * kt
