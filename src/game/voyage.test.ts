@@ -120,7 +120,7 @@ describe('검은 입', () => {
 
     const g2 = new Voyage()
     g2.start(store)
-    expect(Math.round(g2.radius), '크기는 리셋된다 — 항해는 언제나 티끌에서').toBe(7)
+    expect(Math.round(g2.radius), '크기는 리셋된다 — 항해는 언제나 티끌에서').toBe(2)
     expect(g2.journal.some((e) => e.name === eatenName), '명부는 이어진다').toBe(true)
     expect(g2.voyages, '항해 횟수가 센다').toBe(2)
     expect(g2.active.some((b) => b.id === prey.id), '우주는 아문다').toBe(true)
@@ -321,7 +321,7 @@ describe('검은 입', () => {
     g.start(null)
     // 상승 입력은 z 를 올린다
     for (let s = 0; s < 60; s++) g.update(mockInput(0, 0, 1), 1 / 60)
-    expect(g.z, '떠올랐다').toBeGreaterThan(40)
+    expect(g.z, '떠올랐다 (티끌 눈금: 가속 62.4 기준 1초 ≈ 30px)').toBeGreaterThan(15)
 
     const g2 = new Voyage()
     g2.start(null)
@@ -380,7 +380,8 @@ describe('검은 입', () => {
     }
     expect(earth.r, '지구가 스멀스멀 깎인다').toBeLessThan(r0 - 0.03)
     for (let s = 0; s < 120; s++) g.update(input, 1 / 60)
-    expect(g.vol, '깎인 것은 스트림으로 내 것이 된다').toBeGreaterThan(vol0 + 10)
+    // 소화는 질량 비례(5%/s) — 티끌의 2초 소화분은 몸의 ~10% 수준이면 정상
+    expect(g.vol, '깎인 것은 스트림으로 내 것이 된다').toBeGreaterThan(vol0 + 3)
   })
 
   it('⑱ 은하화 — 거대해지면 잔챙이는 삼켜지지 않고 나를 영원히 돈다', () => {
@@ -471,7 +472,9 @@ describe('검은 입', () => {
         }
       }
       g.update(input, 1 / 60)
-      if (g.eatenThisRun > lastEat) {
+      // 굶주림 = 먹는 행위가 전혀 없음 — 삼킴뿐 아니라 잠식·스트림 식사(feed
+      // 게이지)도 식사다. 행성을 몇 초씩 갉아먹는 동안을 기아로 세면 오판이다.
+      if (g.eatenThisRun > lastEat || g.feed > 0.5) {
         lastEat = g.eatenThisRun
         starve = 0
       } else {
@@ -479,10 +482,11 @@ describe('검은 입', () => {
         if (starve > worstStarve) worstStarve = starve
       }
     }
-    // 압축비 도입 후 성장은 느긋해야 정상 — 2분에 반지름이 "의미 있게"만 자라면 된다
-    expect(g.radius, '2분 뒤 반지름').toBeGreaterThan(8.2)
-    // 압도감 계약 — 2분 만에 행성 사냥꾼급이면 우주가 작아진다 (과속 금지)
-    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(22)
+    // 티끌 시작(R1.8) + 질량 비례 소화 — 2분에 티끌이 "검은 입"(R12) 문턱쯤.
+    // 실측 2026-07-18: R11.8, 기아 최장 19.1s. 태양계 1막이 몇 분은 가야 한다.
+    expect(g.radius, '2분 뒤 반지름 (실측 11.8)').toBeGreaterThan(4.5)
+    // 압도감 계약 — 2분 만에 행성 사냥꾼(30)급이면 우주가 작아진다 (과속 금지)
+    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(16)
     expect(worstStarve, '최장 기아 구간(초)').toBeLessThan(30)
   })
 })

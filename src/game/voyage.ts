@@ -44,12 +44,13 @@ const FRAME_DRAG = 0.45
 /** 검은 입 흡인 배율 — 같은 반지름의 항성보다 세게 끈다 (밀집천체의 특권) */
 const MAW_PULL = 3
 /**
- * 에딩턴 한계 — 강착 속도는 내 단면적(R²)에 묶인다 (실물리: 복사압이 유입을 막는다).
- * 이게 게임의 심장 박동이다: 땅콩이 태양을 먹을 수 **있지만 수 분짜리 공성전**이고,
- * 커지면 같은 별이 몇 초가 된다 — "커지면 어제 못 삼키던 것을 삼킨다"가 속도로 돌아온다.
- * (무제한이면 첫 태양을 몇 분에 먹고 "더 할 게 없는" 게임이 된다: 실플레이)
+ * 파괴 상수 — 접촉 잠식(bite)의 속도 눈금. **파괴와 성장은 분리다**: 세계는
+ * R^1.6 눈금으로 순식간에 무너지고(지구 2초·태양은 R7 공성 20초), 내 성장은
+ * 질량 비례 소화(5%/s)가 따로 늦춘다. 5400 은 "성장 가속 없이 R7 정지 상태로
+ * 태양 공성 20초"가 나오는 값 (구 560 은 공성 중 성장 폭주가 시간을 채우던
+ * 시절의 눈금 — 소화 분리 후 192초가 되어 재보정).
  */
-const EDDINGTON = 560
+const EDDINGTON = 5400
 /** 로슈 접근 배율 — (R + r) 의 이 배수 안이면 조석 파괴 */
 const ROCHE = 1.3
 /** 삼킨 부피의 성장 환산 배율 */
@@ -159,9 +160,11 @@ export function rankOf(radius: number): string {
 /**
  * 추진 가속 — 카메라가 반지름에 비례해 물러나므로(줌아웃 ∝ R) 가속도 화면
  * 눈금을 따라야 한다. 지수 0.85: 완전 비례보다 살짝 아래 — 묵직함은 남긴다.
+ * 앵커는 카메라 바닥(130px 화면)에서 62.4 = 예전 950px 화면의 456 과 같은
+ * 화면 체감(0.48화면/s²)이다.
  */
 function thrustAcc(radius: number): number {
-  return 456 * Math.pow(Math.max(950, radius * 26) / 950, 0.85)
+  return 62.4 * Math.pow(Math.max(130, radius * 26) / 130, 0.85)
 }
 
 export interface Rival {
@@ -222,8 +225,12 @@ interface Gas {
 }
 
 const GAS_MAX = 240
-/** 시작 부피 — R≈7 (점진 압축 반영: volFor(7)) */
-const START_VOL = 3190
+/**
+ * 시작 부피 — R≈1.8: **진짜 티끌**. 지구(9.2)의 1/5, 목성(32)의 1/18, 태양(90)의
+ * 1/50. 예전 R7 은 시작부터 토성의 1/4 이라 "왜 시작부터 토성만 해?"가 됐다
+ * (실플레이). 코딱지의 눈높이(카메라 바닥 130px)에서 행성은 거대해야 한다.
+ */
+const START_VOL = 27
 
 export class Voyage {
   // ── 나 — 검은 입
@@ -398,10 +405,19 @@ export class Voyage {
     this.eatCount = 0
     this.voyages += 1
     this.lastRank = rankOf(this.radius)
+    this.refreshSectors(true)
+    // 지구 곁에서 눈뜬다 — 타이틀의 약속이자 스케일의 증명: 티끌의 눈높이에서
+    // 첫 화면부터 행성이 거대해야 한다 ("왜 시작부터 토성만 해": 실플레이)
+    const earth = this.active.find((b) => b.id === hashSeed('sol:지구'))
+    if (earth) {
+      this.x = earth.x + earth.r * 5
+      this.y = earth.y + earth.r * 2.5
+      this.z = earth.z
+      this.refreshSectors(true)
+    }
     this.camera.x = this.x
     this.camera.y = this.y
-    this.camera.viewHeight = Math.max(1100, this.radius * 30)
-    this.refreshSectors(true)
+    this.camera.viewHeight = Math.max(160, this.radius * 30)
     this.persist()
   }
 
@@ -701,12 +717,13 @@ export class Voyage {
     if (rC < 6000) {
       // 황도 먼지 — 요람의 군것질
       const cradle = rC < 3600
-      const cnt = cradle ? 20 + rng.int(8) : 9 + rng.int(4)
+      const cnt = cradle ? 22 + rng.int(8) : 9 + rng.int(4)
       for (let i = 0; i < cnt; i++) {
         const dSeed = hashSeed(`${seed}:cr:${i}`)
+        // 크기 스펙트럼은 바닥이 두껍다(rng²) — 티끌(R1.8)의 첫 끼니는 조약돌이다
         const d = this.newBody(dSeed, BodyKind.Dust,
           sx * SECTOR + rng.next() * SECTOR, sy * SECTOR + rng.next() * SECTOR,
-          3.4 + rng.next() * 2.6, 0.55, 0.5, 0.6)
+          1.0 + rng.next() * rng.next() * 4.6, 0.55, 0.5, 0.6)
         d.z = (rng.next() - 0.5) * 360
         list.push(d)
       }
@@ -896,7 +913,10 @@ export class Voyage {
     const R = this.radius
     // 줌 눈금 — 거대해질수록 R×26 → R×18 로 수렴: 무한 줌아웃이면 주변이 전부
     // 동전이 된다 (실플레이). 내 존재감과 이웃의 크기가 같이 자란다.
-    const base = Math.max(950, R * (26 - 8 * Math.min(1, R / 1300)))
+    // 바닥 130: 티끌의 눈높이. 950 이면 목성 옆에 붙어도 화면의 4% 동전이다
+    // ("토성이 보이면 화면 한구석을 가려야": 실플레이) — 행성이 하늘을 채우려면
+    // 카메라가 내 몸집 눈금으로 바짝 붙어야 한다.
+    const base = Math.max(130, R * (26 - 8 * Math.min(1, R / 1300)))
 
     // 추진 — 화면 눈금으로 민첩하게, 놓으면 서서히 선다. 역추진은 브레이크다.
     const mx = input.move.x
@@ -1109,12 +1129,15 @@ export class Voyage {
 
     // ── 가스 스트림 강착 — 찢긴 질량은 구름으로 흘러들어와 서서히 내 것이 된다
     if (this.streamIn > 0.5) {
-      // 소화 하한 = 몸 크기의 5%/s — 에딩턴 절대 캡만 있으면 합병 대어(r760
-      // 라이벌 ≈ 수 시간)가 소화 내내 퀘이사·제트·feed 를 영구 점화시킨다
-      // (적대 리뷰 산술). 초반은 에딩턴 항이 커서 페이스 불변 (교차 ~R40).
+      // 소화(흡수) = 내 부피의 5%/s — 진짜 에딩턴 한계는 질량 비례다(Ṁ∝M).
+      // 절대 캡(R^1.6)이면 티끌이 초당 제 몸의 50배를 삼켜 성장이 폭주하고
+      // (봇 실측 2분 R30 — 태양계 1막이 1분에 끝난다), 합병 대어는 소화가
+      // 수 시간이라 퀘이사가 영구 점화된다 — 질량 비례 하나가 양끝을 고친다.
+      // 파괴 속도(bite)는 별개라 "지구 순삭" 스펙터클은 그대로다: 세계는
+      // 순식간에 무너지고, 나는 그 잔해 구름 속에서 천천히 붇는다.
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        Math.max(EDDINGTON * Math.pow(R, 1.6) * 0.6, this.vol * 0.05) * step,
+        this.vol * 0.05 * step,
       )
       this.vol += take
       this.streamIn -= take
@@ -1247,27 +1270,52 @@ export class Voyage {
       const dz = this.z - rv.z
       const d = Math.hypot(dx, dy, dz) || 1
       const bigger = rr > R
-      // 블랙홀은 도망치지 않는다 — 추진기가 없다. 작은 놈은 중력대로 끌려와
-      // 나선낙하할 뿐이고("왜 도망을 치냐": 실플레이), 큰 놈만 나를 사냥한다.
-      if (bigger && d < 2400 + R * 8) {
-        const racc = thrustAcc(rr) * 0.44
-        rv.vx += (dx / d) * racc * step
-        rv.vy += (dy / d) * racc * step
-        rv.vz += (dz / d) * racc * step
-      }
+      // 라이벌은 적이 아니라 천체다 — 사냥 AI 없음 (사용자가 요청한 건 합병
+      // 스펙터클뿐, 쫓아다니는 적은 설계 선언 "적 없음" 위반이었다: 실플레이).
+      // 작은 놈은 중력대로 끌려와 나선낙하하고, 큰 놈은 그 자리의 위험 지형이다.
       // 중력은 동족도 예외가 아니다 ("중력이 있는데 왜 도망다니냐" — 실플레이).
       // 작은 놈은 내가 끈다: 멀리선 도주 추진이 이기고, 너무 가까우면 발버둥치며
-      // 끌려온다. 큰 놈의 중력은 나를 끈다 — 가까이 간 쪽이 잘못한 거다.
+      // 끌려온다. 큰 놈의 중력은 나를 끈다 — 단, 탈출은 언제나 가능해야 게임이다:
+      // 당김 상한 = 내 추진의 75% (역추진 1.7배면 여유 있게 이긴다).
       if (!bigger && d < R * 14) {
         const g = Math.min(PULL_CAP_BY_ME, (R * R * GRAV * MAW_PULL) / (d * d))
         rv.vx += (dx / d) * g * step
         rv.vy += (dy / d) * g * step
         rv.vz += (dz / d) * g * step
       } else if (bigger && d < rr * 9) {
-        const g = Math.min(PULL_CAP_ON_ME, (rr * rr * GRAV) / (d * d))
+        const g = Math.min(thrustAcc(R) * 0.75, (rr * rr * GRAV) / (d * d))
         this.vx += (-dx / d) * g * step
         this.vy += (-dy / d) * g * step
         this.vz += (-dz / d) * g * step
+      }
+      // 조석 강탈 — 큰 검은 입 곁에 있으면 그것만으로 내 가스가 그쪽으로 흘러
+      // 나간다 (시그너스 X-1 을 내가 당하는 쪽). 물기·밀치기·넉백은 없다 —
+      // 블랙홀은 밀 수 없다 ("왜 나를 밀어내고 도망치냐": 실플레이 확정 결함).
+      if (bigger) {
+        const reach = (rr + R) * 2.6
+        if (d < reach) {
+          const prox = 1 - d / reach
+          const drain = Math.min(this.vol - START_VOL, this.vol * (0.05 + 0.5 * prox * prox) * step)
+          if (drain > 0) {
+            this.vol -= drain
+            rv.vol += drain
+            this.feed = Math.max(this.feed, 0.3 + prox * 0.4)
+            if (this.bittenCd <= 0) {
+              this.bittenCd = 1.2
+              this.camera.shake(2 + prox * 4, 6)
+              this.sfx('hurt')
+            }
+            // 내 살이 리본으로 뜯겨 그쪽으로 감겨 간다 — 강탈이 눈에 보여야 한다
+            const ga = Math.atan2(dy, dx) + 0.5
+            this.spawnGas(
+              this.x - (dx / d) * R * 0.8, this.y - (dy / d) * R * 0.8, this.z - (dz / d) * R * 0.5,
+              -(dx / d) * (120 + prox * 260) - Math.sin(ga) * 60,
+              -(dy / d) * (120 + prox * 260) + Math.cos(ga) * 60,
+              -(dz / d) * (80 + prox * 160),
+              Math.max(4, R * 0.4), 1.1, 0.55, 0.4, 1.1,
+            )
+          }
+        }
       }
       const rdrag = Math.exp(-0.14 * step)
       rv.vx *= rdrag
@@ -1286,17 +1334,7 @@ export class Voyage {
       // 라이벌 자신의 이동분만 팽창 — 상대속도면 순항 스침이 화면 밖 합병이 된다
       const rvSp = Math.hypot(rv.vx, rv.vy, rv.vz)
       if (sd < (rr + R) * 0.9 + rvSp * step) {
-        if (bigger && this.bittenCd <= 0) {
-          const stolen = this.vol * 0.26
-          this.vol -= stolen
-          rv.vol += stolen
-          this.bittenCd = 2.5
-          const kb = thrustAcc(R) * 1.4
-          this.vx += (dx / d) * kb
-          this.vy += (dy / d) * kb
-          this.camera.shake(6, 8)
-          this.sfx('hurt')
-        } else if (!bigger && !this.merging) {
+        if (!bigger && !this.merging) {
           // 나선낙하 시작 — 즉석 흡수가 아니라 미친 회전으로 감아 돈다 (LIGO).
           // 나보다 크지만 않으면 전부: 예전엔 0.8R~1.0R 가 물지도 합병하지도
           // 못하는 사각지대라 그냥 부딪히기만 했다 ("병신같은거": 실플레이).
@@ -1608,10 +1646,12 @@ export class Voyage {
     this.vx += (b.vx - this.vx) * f
     this.vy += (b.vy - this.vy) * f
     this.vz += (b.vz - this.vz) * f
-    // 성장은 영상처럼 — 큰 수확은 한 틱 점프가 아니라 수 초에 걸쳐 부풀어 오른다
-    // ("사람 크기부터 개큰 블랙홀까지 가는 영상": 사용자). 작은 건 즉시.
+    // 성장은 영상처럼 — 수확은 한 틱 점프가 아니라 소화(질량 비례 에딩턴)를
+    // 거쳐 부풀어 오른다 ("사람 크기부터 개큰 블랙홀까지 가는 영상": 사용자).
+    // 즉시 반영은 티끌(3% 미만)만 — 즉시 문턱이 크면 요람 폭식으로 폭주한다
+    // (봇 실측 30초 R22).
     const gain = bMass * ABSORB_GAIN
-    if (gain > this.vol * 0.12) this.streamIn += gain
+    if (gain > this.vol * 0.03) this.streamIn += gain
     else this.vol += gain
     this.gulp = Math.min(1, b.r / R + 0.25)
     this.eatCount += 1
