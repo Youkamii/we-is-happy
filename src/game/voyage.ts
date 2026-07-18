@@ -1533,7 +1533,9 @@ export class Voyage {
       // 순항 해제(4.5/s)가 도착 브레이크보다 빠르다.
       if (b.r >= R * 0.8 && d - b.r < anyDist) anyDist = d - b.r
       if (b.r >= R * EDIBLE) continue
-      if (b.r >= R * 0.12) {
+      // "한 입"의 기준은 내 25% — 잔몹(그 미만)은 표적이 아니라 지나가며
+      // 쓸어담는 배경이다 ("하루종일 잔몹 쳐먹네": 실플레이)
+      if (b.r >= R * 0.25) {
         if (d < this.preyDist) {
           this.preyDist = d
           this.preyX = b.x
@@ -1546,12 +1548,6 @@ export class Voyage {
         cY = b.y
         cZ = b.z
       }
-    }
-    if (this.preyDist === Infinity && crumbDist < Infinity) {
-      this.preyDist = crumbDist
-      this.preyX = cX
-      this.preyY = cY
-      this.preyZ = cZ
     }
     this.nearAny = anyDist
     // 다음 항로 — 지도 항성계 곁("도착")이 아니라면 **언제나** 계산해 HUD 에
@@ -1575,7 +1571,7 @@ export class Voyage {
         const s = STAR_MAP[bi]!
         this.routeName = s.name
         this.routeDist = best
-        // 화살 우선순위: 한 입감 > 잔부스러기 > 항로 — 곁에 진짜 먹이가 없을 때만
+        // 화살 우선순위: 진짜 한 입감 > 항로 — 잔몹은 화살을 받을 자격이 없다
         if (this.preyDist === Infinity) {
           this.preyDist = best
           this.preyX = s.x
@@ -1583,6 +1579,13 @@ export class Voyage {
           this.preyZ = s.z
         }
       }
+    }
+    // 잔부스러기 폴백은 항로조차 없을 때(지도 계 곁 청소 국면)만
+    if (this.preyDist === Infinity && crumbDist < Infinity) {
+      this.preyDist = crumbDist
+      this.preyX = cX
+      this.preyY = cY
+      this.preyZ = cZ
     }
 
     // ── 성간 먼지 유입 — 우주는 다시 채워진다. 이게 없으면 먹은 자리가 판 내내
