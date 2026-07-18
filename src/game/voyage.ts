@@ -1142,12 +1142,13 @@ export class Voyage {
       const dz = this.z - rv.z
       const d = Math.hypot(dx, dy, dz) || 1
       const bigger = rr > R
-      if (d < 2400 + R * 8) {
-        const dir = bigger ? 1 : -1
-        const racc = thrustAcc(rr) * (bigger ? 0.44 : 0.55)
-        rv.vx += (dx / d) * dir * racc * step
-        rv.vy += (dy / d) * dir * racc * step
-        rv.vz += (dz / d) * dir * racc * step
+      // 블랙홀은 도망치지 않는다 — 추진기가 없다. 작은 놈은 중력대로 끌려와
+      // 나선낙하할 뿐이고("왜 도망을 치냐": 실플레이), 큰 놈만 나를 사냥한다.
+      if (bigger && d < 2400 + R * 8) {
+        const racc = thrustAcc(rr) * 0.44
+        rv.vx += (dx / d) * racc * step
+        rv.vy += (dy / d) * racc * step
+        rv.vz += (dz / d) * racc * step
       }
       // 중력은 동족도 예외가 아니다 ("중력이 있는데 왜 도망다니냐" — 실플레이).
       // 작은 놈은 내가 끈다: 멀리선 도주 추진이 이기고, 너무 가까우면 발버둥치며
