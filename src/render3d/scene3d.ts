@@ -35,7 +35,7 @@ void main(){
   vec2 p = vUv - uHole; p.x *= uAspect;
   float d = length(p);
   vec2 dir = d > 1e-4 ? p / d : vec2(0.0,1.0);
-  float defl = (uR*uR*1.5) / max(d - uR*0.3, uR*0.4);
+  float defl = (uR*uR*2.3) / max(d - uR*0.3, uR*0.4);
   vec2 uv = vUv + vec2(dir.x/uAspect, dir.y) * defl;
   vec3 col = texture2D(tDiffuse, uv).rgb;
   // 사건의 지평선 — 렌즈 다음에 깎아야 진짜 검다
@@ -136,15 +136,21 @@ export class Scene3D {
     this.scene.fog = new THREE.FogExp2(0x05070f, 0.00004)
     this.camera = new THREE.PerspectiveCamera(58, 1.77, 1, 400000)
 
-    this.scene.add(new THREE.AmbientLight(0x8899bb, 0.5))
+    // 우주는 칠흑이지만 게임은 보여야 한다 — 은은한 전역광 + 반대편 보조광
+    this.scene.add(new THREE.AmbientLight(0x9aa8c8, 0.85))
     this.sun = new THREE.DirectionalLight(0xfff2dd, 1.4)
     this.scene.add(this.sun)
+    const fill = new THREE.DirectionalLight(0x6677aa, 0.4)
+    fill.position.set(-3, -2, -4)
+    this.scene.add(fill)
 
     const glowTex = glowTexture()
     const smokeTex = smokeTexture()
 
     const sphere = new THREE.SphereGeometry(1, 20, 14)
-    this.lit = new THREE.InstancedMesh(sphere, new THREE.MeshLambertMaterial(), MAX_INST)
+    const litMat = new THREE.MeshLambertMaterial()
+    litMat.emissive = new THREE.Color(0x101623) // 완전 검정으로는 안 떨어진다
+    this.lit = new THREE.InstancedMesh(sphere, litMat, MAX_INST)
     this.lit.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.lit)
     this.emis = new THREE.InstancedMesh(sphere, new THREE.MeshBasicMaterial(), 600)
@@ -214,8 +220,8 @@ export class Scene3D {
     starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
     starGeo.setAttribute('color', new THREE.BufferAttribute(colArr, 3))
     this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
-      size: 2.2, sizeAttenuation: false, vertexColors: true,
-      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9,
+      size: 2.6, sizeAttenuation: false, vertexColors: true,
+      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 1,
     }))
     this.scene.add(this.stars)
 
@@ -286,8 +292,8 @@ export class Scene3D {
     const py = g.z // three y = 게임 z (위)
     const pz = g.y
 
-    // 카메라 — 뒤에서 비스듬히. 줌은 게임의 성장 줌(viewHeight)을 그대로 쓴다
-    const dist = g.camera.viewHeight * 0.95 * this.zoomBias
+    // 카메라 — 뒤에서 비스듬히, 내가 화면에서 점이 되지 않을 만큼 가깝게
+    const dist = g.camera.viewHeight * 0.58 * this.zoomBias
     const cp = Math.cos(this.pitch)
     this.camera.position.set(
       px + Math.sin(this.yaw) * cp * dist,
@@ -457,7 +463,8 @@ export class Scene3D {
     const h = Math.max(1, this.renderer.domElement.clientHeight)
     this.lensPass.uniforms['uHole']!.value.set((this.v3.x + 1) / 2, (this.v3.y + 1) / 2)
     const rScreen = R / (Math.tan((this.camera.fov * Math.PI) / 360) * dist * 2)
-    this.lensPass.uniforms['uR']!.value = Math.max(0.012, rScreen)
+    // 렌즈는 내 존재 증명이다 — 작아도 보이게 바닥값을 두고 살짝 부풀린다
+    this.lensPass.uniforms['uR']!.value = Math.max(0.03, rScreen * 1.35)
     this.lensPass.uniforms['uAspect']!.value = w / h
   }
 
