@@ -360,6 +360,10 @@ export class Voyage {
     this.nearAny = Infinity
     this.routeName = null
     this.routeDist = 0
+    this.preyDist = Infinity
+    this.preyX = 0
+    this.preyY = 0
+    this.preyZ = 0
     for (const g of this.gas) g.life = 0
     if (store) {
       try {
@@ -791,9 +795,10 @@ export class Voyage {
       }
     }
 
-    // 캐시 축출 — 시야(N)가 커질수록 더 많이 쥔다
+    // 캐시 축출 — 시야(N)가 커질수록 더 많이 쥔다. keep 은 보존 박스(N+2)²보다
+    // 커야 한다 — 작으면 포화 상태에서 삭제 대상 0인 풀스캔이 반복된다 (적대 리뷰)
     const N = this.rangeN()
-    const keep = (2 * N + 3) * (2 * N + 3) + 32
+    const keep = (2 * N + 5) * (2 * N + 5) + 40
     if (this.sectors.size > keep) {
       const pcx = Math.floor(this.x / SECTOR)
       const pcy = Math.floor(this.y / SECTOR)
@@ -814,7 +819,8 @@ export class Voyage {
     if (rC < SHELL.oortOut) return null
     const seed = hashSeed(`${UNIVERSE_SEED}:rv:${sx}:${sy}`)
     const rng = new Rng(seed)
-    if (rng.next() >= 0.07) return null
+    // 밀도는 유지 — 요람 보호가 명분이지 성간까지 심심해질 이유는 없다 (적대 리뷰)
+    if (rng.next() >= 0.13) return null
     const r = Math.min(760, 24 + (rC / LY) * 26 + rng.next() * 20)
     return {
       id: seed,
@@ -901,8 +907,21 @@ export class Voyage {
     // 몇 배로 열린다: "다음 별이 너무 멀어"의 수리. 태양계 안 오르트까지의
     // 한세월 감각은 그대로 두고, 진짜 빈 성간만 접는다. 뭔가 가까워지면
     // 빠르게 풀린다 — 도착 브레이크가 순항보다 세야 지나치지 않는다.
-    const empty = this.nearAny > base * 4 && this.preyDist > base * 6
-    const ck = empty && this.thrusting ? 0.45 : 2.4
+    // 지도 감속 — 감지(nearAny)는 로드 반경(≤~17k px)에 묶이는데 제동거리는
+    // R·속도 비례라 거대한 몸은 목적지를 관통한다 (적대 리뷰: R700 관통 확정).
+    // 지도 항성계·태양계 거리는 로드와 무관하니 이걸로 미리 브레이크를 밟는다.
+    let mapNear = Math.hypot(800 - this.x, 800 - this.y, this.z) - SHELL.oortIn
+    for (const s of STAR_MAP) {
+      const dm = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z) - s.r
+      if (dm < mapNear) mapNear = dm
+    }
+    const spNow = Math.hypot(this.vx, this.vy, this.vz)
+    // 게이트는 둘뿐: 의미 있는 천체(내 30%+)가 2.5화면 안에 있는가 + 지도 제동.
+    // preyDist(잔부스러기 폴백 포함)를 게이트에 넣으면 성간의 상수 밀도 잔챙이가
+    // 거대 R 의 문턱 안에 언제나 있어 순항이 죽는다 (계측 0~5%). 잔챙이·한입거리는
+    // 순항을 막을 자격이 없다 — 지나가며 입이 쓸어담는다.
+    const empty = this.nearAny > base * 2.5 && mapNear > spNow * 1.4 + base * 8
+    const ck = empty && this.thrusting ? 0.45 : 4.5
     this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
     const acc = thrustAcc(R) * this.cruise
     if (this.thrusting) {
@@ -1090,9 +1109,12 @@ export class Voyage {
 
     // ── 가스 스트림 강착 — 찢긴 질량은 구름으로 흘러들어와 서서히 내 것이 된다
     if (this.streamIn > 0.5) {
+      // 소화 하한 = 몸 크기의 5%/s — 에딩턴 절대 캡만 있으면 합병 대어(r760
+      // 라이벌 ≈ 수 시간)가 소화 내내 퀘이사·제트·feed 를 영구 점화시킨다
+      // (적대 리뷰 산술). 초반은 에딩턴 항이 커서 페이스 불변 (교차 ~R40).
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        EDDINGTON * Math.pow(R, 1.6) * 0.6 * step,
+        Math.max(EDDINGTON * Math.pow(R, 1.6) * 0.6, this.vol * 0.05) * step,
       )
       this.vol += take
       this.streamIn -= take
@@ -1196,8 +1218,11 @@ export class Voyage {
         const zc = prevZ + (this.z - prevZ) * tt - b.z
         const dzEff = Math.max(0, Math.abs(zc) - R * 2) * 0.5
         const d = Math.hypot(dxy, dzEff)
-        const relV = Math.hypot(b.vx - this.vx, b.vy - this.vy, b.vz - this.vz)
-        if (d < R * 3.2 + b.r + relV * step) {
+        // 팽창은 먹이 **자신의** 이동분만 — 상대속도면 내 속도가 이중 계상돼
+        // 순항(×6)에서 수천 px 드라이브바이 통로가 열린다 (적대 리뷰).
+        // 내 이동은 위의 선분 스윕이 이미 담당한다.
+        const bV = Math.hypot(b.vx, b.vy, b.vz)
+        if (d < R * 3.2 + b.r + bV * step) {
           // 은하화 — 내가 크고 상대가 티끌이면 삼키지 않고 궤도에 가둔다.
           // 초대질량 블랙홀이 은하를 거느리는 방식 그대로: 영원히 돈다.
           if (R > 60 && b.r < R * 0.045 && this.halo.length < 380) {
@@ -1258,8 +1283,9 @@ export class Voyage {
         ? Math.max(0, Math.min(1, ((rv.x - prevX) * msx + (rv.y - prevY) * msy) / mL2))
         : 0
       const sd = Math.hypot(prevX + msx * mtt - rv.x, prevY + msy * mtt - rv.y, this.z - rv.z)
-      const rrel = Math.hypot(rv.vx - this.vx, rv.vy - this.vy, rv.vz - this.vz)
-      if (sd < (rr + R) * 0.9 + rrel * step) {
+      // 라이벌 자신의 이동분만 팽창 — 상대속도면 순항 스침이 화면 밖 합병이 된다
+      const rvSp = Math.hypot(rv.vx, rv.vy, rv.vz)
+      if (sd < (rr + R) * 0.9 + rvSp * step) {
         if (bigger && this.bittenCd <= 0) {
           const stolen = this.vol * 0.26
           this.vol -= stolen
@@ -1419,7 +1445,11 @@ export class Voyage {
     for (const b of this.active) {
       if (this.eaten.has(b.id)) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
-      if (d - b.r < anyDist) anyDist = d - b.r // 표면 거리 — 순항 게이트용
+      // 순항 게이트용 표면 거리 — **삼킬 수 없는 큰 것만**(내 80% 이상, 공성 대상).
+      // 간식까지 세면 성간의 상수 밀도 잔챙이가 거대 R 문턱 안에 늘 있어 순항이
+      // 영영 안 붙는다 (계측 0~5%). 간식에 서고 싶으면 키를 놓으면 된다 —
+      // 순항 해제(4.5/s)가 도착 브레이크보다 빠르다.
+      if (b.r >= R * 0.8 && d - b.r < anyDist) anyDist = d - b.r
       if (b.r >= R * EDIBLE) continue
       if (b.r >= R * 0.12) {
         if (d < this.preyDist) {
@@ -1442,17 +1472,18 @@ export class Voyage {
       this.preyZ = cZ
     }
     this.nearAny = anyDist
-    // 다음 항로 — 성찬이 끝난 공허라면 나침반은 별 지도의 다음 목적지를
-    // 가리킨다. "태양 한번 먹고 더 할 게 없어"의 수리: 우주는 안 끝났다고
-    // 화면이 말해야 한다. 이미 삼킨 계는 건너뛴다.
+    // 다음 항로 — 지도 항성계 곁("도착")이 아니라면 **언제나** 계산해 HUD 에
+    // 내건다. 곁의 간식 유무로 껐다 켜면 분당 수 회 깜빡인다 (적대 리뷰 실측).
+    // "태양 한번 먹고 더 할 게 없어"의 수리: 우주는 안 끝났다고 화면이 말해야 한다.
     this.routeName = null
-    if (this.preyDist > base * 6) {
+    if (mapNear > base * 4) {
       let best = Infinity
       let bi = -1
       for (let i = 0; i < STAR_MAP.length; i++) {
-        if (this.eaten.has(MAP_IDS[i]!)) continue
         const s = STAR_MAP[i]!
-        const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z)
+        // 앵커를 삼켰어도 계의 성찬(행성·성단원)은 남는다 — 제외 대신 후순위
+        const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z) *
+          (this.eaten.has(MAP_IDS[i]!) ? 4 : 1)
         if (d < best) {
           best = d
           bi = i
@@ -1462,6 +1493,7 @@ export class Voyage {
         const s = STAR_MAP[bi]!
         this.routeName = s.name
         this.routeDist = best
+        // 화살 우선순위: 한 입감 > 잔부스러기 > 항로 — 곁에 진짜 먹이가 없을 때만
         if (this.preyDist === Infinity) {
           this.preyDist = best
           this.preyX = s.x
@@ -1474,14 +1506,18 @@ export class Voyage {
     // ── 성간 먼지 유입 — 우주는 다시 채워진다. 이게 없으면 먹은 자리가 판 내내
     // 사막이라 "먹을 게 없다"가 재발한다 (실플레이). 몇 초마다 근처에 새 티끌.
     this.driftCd -= step
-    if (this.driftCd <= 0 && this.active.length < 900) {
+    // 진짜 공허에는 뿌리지 않는다 — 절대거리 500~2100px 스폰이 6초마다 순항
+    // 게이트·항로 나침반을 격추하던 원흉 (적대 리뷰 실측: 순항 가동률 0~3.6%).
+    // 공허는 비어 있어야 순항이 살고, 재보급은 천체 곁에서만 이뤄진다.
+    if (this.driftCd <= 0 && this.active.length < 900 && this.nearAny <= base * 3) {
       this.driftCd = 6
       this.driftN += 1
       const rng = new Rng(hashSeed(`drift:${this.driftN}`))
       const n = 2 + rng.int(2)
       for (let i = 0; i < n; i++) {
         const a = rng.next() * Math.PI * 2
-        const dd = 500 + rng.next() * 1600
+        // 거리도 화면 눈금 비례 — 절대거리면 거대한 입(R·3.2)이 스폰을 그 자리에서 삼킨다
+        const dd = base * (0.55 + rng.next() * 1.7)
         const id = hashSeed(`drift:${this.driftN}:${i}`)
         if (this.eaten.has(id)) continue
         const d = this.newBody(id, BodyKind.Dust,

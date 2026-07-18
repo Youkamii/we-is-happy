@@ -687,7 +687,10 @@ void main(){
           sp.visible = true
           sp.position.set(ax + Math.cos(spiral) * rad, ay + zz, az + Math.sin(spiral) * rad)
           sp.scale.setScalar(sc * (isCore ? 0.45 : 0.7) * (0.6 + ((hh >>> 20) % 60) * 0.01))
-          sp.material.color.setRGB(b.cr * 0.42, b.cg * 0.4, b.cb * 0.5)
+          // 삼켜지는 중이면 연기도 붉게 저문다 (redK — 적색편이 연출 일관성)
+          sp.material.color.setRGB(
+            b.cr * 0.42 * (1 + redK * 0.9), b.cg * 0.4 * (1 - redK * 0.5), b.cb * 0.5 * (1 - redK * 0.7),
+          )
           sp.material.opacity = isCore ? 0.3 : 0.24
         }
         if (glowN < MAX_GLOW) {
@@ -697,6 +700,17 @@ void main(){
           sp.scale.setScalar(sc * (isCore ? 0.7 : 1.3))
           sp.material.color.setRGB(Math.min(1, b.cr * 0.9), Math.min(1, b.cg * 0.8), Math.min(1, b.cb))
           sp.material.opacity = isCore ? 0.5 : 0.3
+        }
+        // 먹이 금테 — 성운도 한 입이 되면 표적으로 읽혀야 한다
+        if (markN < MAX_MARK && b.r < R * 0.8 && b.r >= R * 0.1) {
+          const mdx = b.x - g.x
+          const mdy = b.y - g.y
+          if (mdx * mdx + mdy * mdy < dist * dist * 36) {
+            const mk = this.marks[markN++]!
+            mk.visible = true
+            mk.position.set(ax, ay, az)
+            mk.scale.setScalar(Math.max(sc * 1.6, dist * 0.012))
+          }
         }
         continue
       }
