@@ -1139,7 +1139,9 @@ export class Voyage {
         this.vy += (my / ml) * acc * eff * step
         this.heading = Math.atan2(my, mx)
       }
-      if (lift !== 0) this.vz += lift * acc * 1.15 * step
+      // 수직 추력은 순항 부스터와 분리 — acc 에 물리면 순항 중 스페이스 한 번에
+      // z 가 로켓처럼 폭발한다 (실플레이 "z축 좆버그"의 범인)
+      if (lift !== 0) this.vz += lift * thrustAcc(R) * Math.min(this.cruise, 2.5) * 1.15 * step
       // 순항 조향 — 속도가 아무리 높아도 방향은 든다: 입력 방향으로 속도
       // 벡터를 회전(1.6rad/s, 어떤 속도든 ~2초 U턴). 가속만으론 순항 속도에서
       // 선회 반경이 행성계만 해진다 ("속도만 높으면 컨트롤을 어떻게 해").
@@ -1385,7 +1387,9 @@ export class Voyage {
       this.vx *= k
       this.vy *= k
     }
-    const vzCap = vmax * 0.7
+    // 수직 상한도 기본 눈금 — 순항 부스터 무제한이면 폭주 vz 가 안 죽는다.
+    // 자동 항법의 원거리 z 이동만 예외 (farNav)
+    const vzCap = base * 1.6 * Math.max(1, this.cruise) + (this.navAssist ? farNav * 0.5 : 0)
     if (this.vz > vzCap) this.vz = vzCap
     else if (this.vz < -vzCap) this.vz = -vzCap
     const sp0 = Math.hypot(this.vx, this.vy, this.vz)
