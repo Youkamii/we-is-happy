@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { hashSeed } from '../engine/rng'
-import { STAR_MAP, lyOf } from '../game/starmap'
+import { HOLES, STAR_MAP, lyOf } from '../game/starmap'
 import { BodyKind, bhRadius, bodyRof, type Voyage } from '../game/voyage'
 
 /** 행성 대기 림 색 — 대기 조성이 곧 색이다 */
@@ -742,17 +742,21 @@ void main(){
     this.labelBox = document.createElement('div')
     this.labelBox.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden;'
     ;(canvas.parentElement ?? document.body).appendChild(this.labelBox)
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 7; i++) {
       const d = document.createElement('div')
       d.style.cssText =
         'position:absolute;font:600 11px/1.4 ui-monospace,monospace;color:#c9a35f;' +
         'text-shadow:0 0 6px rgba(0,0,0,.9);white-space:nowrap;display:none;' +
         'pointer-events:auto;cursor:pointer;'
-      // 목적지 클릭 항법 — 이름을 누르면 그리로 간다 (실플레이)
+      // 목적지 클릭 항법 — 이름을 누르면 그리로 간다 (실플레이).
+      // 별지도 뒤 인덱스는 블랙홀 랜드마크 ("다른 블랙홀 위치도": 실플레이)
       d.addEventListener('pointerdown', (e) => {
         e.stopPropagation()
         const si = this.labelSysIdx[i]!
-        if (si >= 0) this.pick = STAR_MAP[si]!
+        if (si >= STAR_MAP.length) {
+          const hh = HOLES[si - STAR_MAP.length]!
+          this.pick = { x: hh.x, y: hh.y, z: hh.z, name: hh.name }
+        } else if (si >= 0) this.pick = STAR_MAP[si]!
       })
       this.labels.push(d)
       this.labelSysIdx.push(-1)
@@ -845,6 +849,9 @@ void main(){
     if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.1 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
+    // 워프 시차 — 위치 비례로 하늘이 흐른다 ("빨리 움직이는데 배경 별은
+    // 그대로": 실플레이). 저속에선 거의 0 — 별은 원래 멀어서 그게 맞다.
+    this.stars.rotation.set(pz * 1.6e-8, px * 2.2e-8, 0)
     this.band.position.copy(this.camera.position)
     this.band.scale.setScalar(dist * 40)
     // 기준면은 황도(z=0)에 고정 — 수직 기동 중에만 뚜렷해진다
@@ -927,7 +934,53 @@ void main(){
         lb.style.textDecoration = gone ? 'line-through' : 'none'
       }
     }
-    for (let i = labelN; i < 5; i++) {
+    // 블랙홀 랜드마크 — 가장 가까운 둘은 이름이 보인다 (보라, 클릭 이동 가능)
+    {
+      let h1 = -1
+      let h2 = -1
+      let hd1 = Infinity
+      let hd2 = Infinity
+      for (let j = 0; j < HOLES.length; j++) {
+        const hh = HOLES[j]!
+        const dh = Math.hypot(hh.x - px, hh.z - py, hh.y - pz) || 1
+        if (dh < hd1) {
+          h2 = h1
+          hd2 = hd1
+          h1 = j
+          hd1 = dh
+        } else if (dh < hd2) {
+          h2 = j
+          hd2 = dh
+        }
+      }
+      for (const [j, dh] of [[h1, hd1], [h2, hd2]] as const) {
+        if (j < 0 || labelN >= 7) continue
+        const hh = HOLES[j]!
+        this.v3.set(hh.x, hh.z, hh.y).project(this.camera)
+        if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
+          this.labelSysIdx[labelN] = STAR_MAP.length + j
+          const lb = this.labels[labelN++]!
+          lb.style.display = 'block'
+          const lx = ((this.v3.x + 1) / 2) * w0 + 8
+          let lyy = ((1 - this.v3.y) / 2) * h0 - 6
+          for (let rep = 0; rep < 4; rep++) {
+            for (const p of placedLb) {
+              if (Math.abs(lyy - p[1]) < 16 && Math.abs(lx - p[0]) < 180) lyy = p[1] + 18
+            }
+          }
+          placedLb.push([lx, lyy])
+          lb.style.left = `${lx}px`
+          lb.style.top = `${lyy}px`
+          const lyd = lyOf(dh)
+          lb.textContent = `● ${hh.name} · ${lyd >= 10000 ? `${(lyd / 10000).toFixed(1)}만 광년`
+            : lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(dh / 1000)}k`}`
+          const gone = g.holeEaten(j)
+          lb.style.color = gone ? '#e05555' : '#c99df0'
+          lb.style.textDecoration = gone ? 'line-through' : 'none'
+        }
+      }
+    }
+    for (let i = labelN; i < 7; i++) {
       this.labels[i]!.style.display = 'none'
       this.labelSysIdx[i] = -1
     }

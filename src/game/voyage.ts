@@ -28,6 +28,7 @@ export const UNIVERSE_SEED = 20260718
 
 /** 실지도 항성계의 몸체 id — 다음 항로 나침반이 "이미 삼킨 계"를 거르는 데 쓴다 */
 const MAP_IDS: readonly number[] = STAR_MAP.map((s) => hashSeed(`map:${s.name}`))
+const HOLE_IDS: readonly number[] = HOLES.map((h) => hashSeed(`hole:${h.name}`))
 
 const SECTOR = 2400
 /** 삼킬 수 있는 크기 비율 — 내 반지름의 이 배수 미만이면 먹이다 */
@@ -404,6 +405,11 @@ export class Voyage {
     return this.eaten.has(MAP_IDS[i] ?? -1)
   }
 
+  /** 블랙홀 랜드마크 i 를 삼켰나 — 라벨 취소선용 */
+  holeEaten(i: number): boolean {
+    return this.eaten.has(HOLE_IDS[i] ?? -1)
+  }
+
   /** 블랙홀 실험 시작 — 버튼이 부른다. 한 번 시작하면 되돌릴 수 없다. */
   startExperiment(): void {
     if (!this.expOn) {
@@ -686,7 +692,18 @@ export class Voyage {
   private buildSystem(sys: MapSystem, list: Body[]): void {
     const id = hashSeed(`map:${sys.name}`)
     const kind = sys.kind === 'sun' ? BodyKind.Sun : sys.kind === 'garden' ? BodyKind.Garden : BodyKind.Core
-    const star = this.newBody(id, kind, sys.x, sys.y, Math.max(60, sys.r), sys.cr, sys.cg, sys.cb)
+    // 지역은 천체가 아니다 ("성운이 오브젝트인 게 말이 돼": 실플레이) —
+    // 은하 앵커는 **중심 블랙홀**(질량의 심), 성운 앵커는 심 구름 하나,
+    // 성단 앵커는 핵이고, 나머지 질량은 아래에서 실제 천체들로 흩어진다.
+    const isGal = sys.kind === 'core' && sys.r >= 8000 && sys.name !== '궁수자리 A*'
+    const anchorR = isGal
+      ? sys.r * 0.5
+      : sys.kind === 'garden' && sys.r > 0
+        ? Math.max(60, sys.r * 0.3)
+        : sys.kind === 'garden' && sys.r === 0
+          ? (sys.ly > 1000 ? 1400 : 220)
+          : Math.max(60, sys.r)
+    const star = this.newBody(id, kind, sys.x, sys.y, anchorR, sys.cr, sys.cg, sys.cb)
     star.z = sys.z
     registerName(id, sys.name, '')
     list.push(star)
@@ -741,16 +758,30 @@ export class Voyage {
         list.push(cb2)
       }
     }
-    // 성운은 별의 요람이다 — 어린 별들이 가스 속에서 태어나고 있다 (실물리)
+    // 성운은 별의 요람이자 **지역**이다 — 가스 덩어리 여럿이 수 광년에 흩어져
+    // 있고 그 속에서 어린 별들이 태어난다 ("왜 하나의 오브젝트여야 해": 실플레이)
     if (kind === BodyKind.Garden && sys.r > 0) {
-      const n = 12
+      const clumpN = 12
+      for (let i = 0; i < clumpN; i++) {
+        const cId3 = hashSeed(`map:${sys.name}:cloud:${i}`)
+        const cr3 = sys.r * (0.3 + rng.next() * 0.2)
+        const cl = this.newBody(cId3, BodyKind.Garden,
+          sys.x + (rng.next() - 0.5) * sys.r * 2.4,
+          sys.y + (rng.next() - 0.5) * sys.r * 2.4, cr3,
+          Math.min(1.2, sys.cr * (0.85 + rng.next() * 0.3)),
+          Math.min(1.1, sys.cg * (0.85 + rng.next() * 0.3)), sys.cb)
+        cl.z = sys.z + (rng.next() - 0.5) * sys.r * 0.8
+        cl.origin = sys.name
+        list.push(cl)
+      }
+      const n = 18
       for (let i = 0; i < n; i++) {
         const sId = hashSeed(`map:${sys.name}:yso:${i}`)
-        const sr = 12 + rng.next() * 30
+        const sr = 14 + rng.next() * 50
         const s = this.newBody(sId, BodyKind.Sun,
-          sys.x + (rng.next() - 0.5) * sys.r * 1.7,
-          sys.y + (rng.next() - 0.5) * sys.r * 1.7, sr, 0.85, 0.8, 1.35)
-        s.z = sys.z + (rng.next() - 0.5) * sys.r * 0.5
+          sys.x + (rng.next() - 0.5) * sys.r * 2.0,
+          sys.y + (rng.next() - 0.5) * sys.r * 2.0, sr, 0.85, 0.8, 1.35)
+        s.z = sys.z + (rng.next() - 0.5) * sys.r * 0.6
         list.push(s)
       }
       // 게 성운의 심장 — 펄서. 1초에 30번 도는 등대 (렌더러가 빔을 돌린다)
@@ -762,24 +793,61 @@ export class Voyage {
         list.push(p)
       }
     }
-    // 성단은 별 여럿이 함께 돈다 (플레이아데스 — 일곱 자매. 구상성단은 훨씬 많다)
+    // 성단은 별 **무리**다 — 산개(플레이아데스)는 느슨한 십수 개, 구상(오메가
+    // 센타우리)은 핵 주위로 수십 개가 공 모양으로 빽빽하다 (실물리 축소판)
     if (kind === BodyKind.Garden && sys.r === 0) {
-      const clusterN = sys.ly > 1000 ? 18 : 6
+      const glob = sys.ly > 1000
+      const clusterN = glob ? 44 : 14
       for (let i = 0; i < clusterN; i++) {
         const sId = hashSeed(`map:${sys.name}:s${i}`)
-        const sr = 90 + rng.next() * 110
-        const s = this.newBody(sId, BodyKind.Sun, sys.x, sys.y, sr, 0.8, 0.95, 1.4)
+        const sr = glob ? 55 + rng.next() * 150 : 70 + rng.next() * 120
+        const s = this.newBody(sId, BodyKind.Sun, sys.x, sys.y, sr,
+          0.8 + rng.next() * 0.4, 0.9 + rng.next() * 0.25, 1.1 + rng.next() * 0.4)
         s.ax = sys.x
         s.ay = sys.y
         s.az = sys.z
-        s.orbR = 600 + rng.next() * 1500
+        s.orbR = glob ? 700 + rng.next() * 3800 : 500 + rng.next() * 1200
         s.orbA = rng.next() * Math.PI * 2
-        s.orbW = 0.03 + rng.next() * 0.03
-        s.inc = (rng.next() - 0.5) * 0.5
+        s.orbW = (0.03 + rng.next() * 0.03) / Math.sqrt(1 + s.orbR / 900)
+        s.inc = (rng.next() - 0.5) * (glob ? 1.4 : 0.5)
         s.x = sys.x + Math.cos(s.orbA) * s.orbR
         s.y = sys.y + Math.sin(s.orbA) * s.orbR * Math.cos(s.inc)
         s.z = sys.z + Math.sin(s.orbA) * s.orbR * Math.sin(s.inc)
         list.push(s)
+      }
+    }
+    // 은하는 나라다 — 중심 블랙홀(앵커) 둘레로 별 원반과 가스가 돈다
+    // ("은하도 얼마나 큰데, 가운데 블랙홀이 있을 거 아냐": 실플레이)
+    if (isGal) {
+      const starN2 = 64
+      for (let i = 0; i < starN2; i++) {
+        const sId2 = hashSeed(`map:${sys.name}:gs:${i}`)
+        const rr2 = 90 + rng.next() * 320
+        const s2 = this.newBody(sId2, BodyKind.Sun, sys.x, sys.y, rr2,
+          0.9 + rng.next() * 0.6, 0.85 + rng.next() * 0.4, 0.8 + rng.next() * 0.6)
+        s2.ax = sys.x
+        s2.ay = sys.y
+        s2.az = sys.z
+        s2.orbR = star.r * (1.4 + rng.next() * 2.2)
+        s2.orbA = rng.next() * Math.PI * 2
+        s2.orbW = (0.02 + rng.next() * 0.03) / Math.sqrt(0.5 + s2.orbR / star.r)
+        s2.inc = (rng.next() - 0.5) * 0.24
+        s2.x = sys.x + Math.cos(s2.orbA) * s2.orbR
+        s2.y = sys.y + Math.sin(s2.orbA) * s2.orbR * Math.cos(s2.inc)
+        s2.z = sys.z + Math.sin(s2.orbA) * s2.orbR * Math.sin(s2.inc)
+        list.push(s2)
+      }
+      const gasN2 = 8
+      for (let i = 0; i < gasN2; i++) {
+        const gId2 = hashSeed(`map:${sys.name}:ggas:${i}`)
+        const gr3 = sys.r * (0.08 + rng.next() * 0.08)
+        const gb2 = this.newBody(gId2, BodyKind.Garden,
+          sys.x + (rng.next() - 0.5) * star.r * 4.5,
+          sys.y + (rng.next() - 0.5) * star.r * 4.5, gr3,
+          sys.cr, sys.cg, Math.min(1.3, sys.cb * 1.1))
+        gb2.z = sys.z + (rng.next() - 0.5) * star.r * 0.6
+        gb2.origin = sys.name
+        list.push(gb2)
       }
     }
   }
