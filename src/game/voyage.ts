@@ -1072,10 +1072,11 @@ export class Voyage {
         b.vy = Math.cos(b.orbA) * tv * ci + (b.host ? b.host.vy : 0)
         b.vz = Math.cos(b.orbA) * tv * si + (b.host ? b.host.vz : 0)
       }
-      // 내 중력 — 나보다 작은 것만 내가 끈다 (질량 우위).
-      // **사거리 컷 없음**: 중력은 모든 공간에 미친다. 1/r² 이 자연 감쇠다
-      // ("인근에만 닿으면 안 되잖아" — 실플레이. 돌조각이 곁에서 구경하는 꼴 금지).
-      if (b.r < R) {
+      // 내 중력 — **질량이 내 밑이면 전부** 내가 끈다. 반지름 서열은 물리가
+      // 거꾸로다: 태양 84개 질량이 지름 큰 별한테 무시당했다 ("큰 것들은
+      // 오지도 않아": 실플레이). 내가 무거워지는 순간 태양도 나에게 떨어진다.
+      // **사거리 컷 없음**: 중력은 모든 공간에 미친다. 1/r² 이 자연 감쇠다.
+      if (b.r * b.r * b.r < this.vol) {
         const dx = this.x - b.x
         const dy = this.y - b.y
         const dz = this.z - b.z
@@ -1090,10 +1091,11 @@ export class Voyage {
           const heavy = 1 + R / 60
           const capMe = PULL_CAP_BY_ME * (1 + R / 80)
           let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
-          // 먹이급 견인 보너스 — 상수 사거리 대신 부드러운 감쇠 (전역 유효)
+          // 먹이급 견인 보너스 — 두어 화면 밖에서도 다가오는 게 보여야 한다
+          // ("내가 쟤 위치까지 가야만 따라와": 실플레이 — 사거리 R·20→R·34)
           if (edibleB) {
-            const near = (R * 20) / (d + R * 20)
-            g = Math.min(capMe, g + 160 * heavy * near * near)
+            const near = (R * 34) / (d + R * 34)
+            g = Math.min(capMe, g + 230 * heavy * near * near)
           }
           if (!b.free && b.orbR > 0) {
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
@@ -1168,7 +1170,8 @@ export class Voyage {
     let domG = 0
     let domB: Body | null = null
     for (const b of this.active) {
-      if (b.r <= R || this.eaten.has(b.id)) continue
+      // 나를 끄는 것도 질량 기준 — 내가 더 무거우면 저쪽이 내 밥이다
+      if (b.r * b.r * b.r <= this.vol || this.eaten.has(b.id)) continue
       const dx = b.x - this.x
       const dy = b.y - this.y
       const dz = b.z - this.z
@@ -1585,6 +1588,10 @@ export class Voyage {
     this.preyDist = Infinity
     let crumbDist = Infinity
     let anyDist = Infinity
+    let siegeDist = Infinity
+    let sgX = 0
+    let sgY = 0
+    let sgZ = 0
     let cX = 0
     let cY = 0
     let cZ = 0
@@ -1596,7 +1603,17 @@ export class Voyage {
       // 영영 안 붙는다 (계측 0~5%). 간식에 서고 싶으면 키를 놓으면 된다 —
       // 순항 해제(4.5/s)가 도착 브레이크보다 빠르다.
       if (b.r >= R * 0.8 && d - b.r < anyDist) anyDist = d - b.r
-      if (b.r >= R * EDIBLE) continue
+      if (b.r >= R * EDIBLE) {
+        // 공성 대상 — 통째론 못 삼켜도 질량이 내 밑이면 내 먹이다: 나침반이
+        // 잡아야 한다 ("보이지도 않아서 먹지도 못하네": 실플레이)
+        if (b.r * b.r * b.r < this.vol * 0.8 && d - b.r < siegeDist) {
+          siegeDist = d - b.r
+          sgX = b.x
+          sgY = b.y
+          sgZ = b.z
+        }
+        continue
+      }
       // "한 입"의 기준은 내 25% — 잔몹(그 미만)은 표적이 아니라 지나가며
       // 쓸어담는 배경이다 ("하루종일 잔몹 쳐먹네": 실플레이)
       if (b.r >= R * 0.25) {
@@ -1612,6 +1629,13 @@ export class Voyage {
         cY = b.y
         cZ = b.z
       }
+    }
+    // 화살 우선순위: 한 입감 > 공성 대상 > 항로 > 잔부스러기
+    if (this.preyDist === Infinity && siegeDist < Infinity) {
+      this.preyDist = siegeDist
+      this.preyX = sgX
+      this.preyY = sgY
+      this.preyZ = sgZ
     }
     this.nearAny = anyDist
     // 다음 항로 — 지도 항성계 곁("도착")이 아니라면 **언제나** 계산해 HUD 에
