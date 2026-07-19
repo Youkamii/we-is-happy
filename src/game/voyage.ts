@@ -326,6 +326,7 @@ export class Voyage {
   /** 현재 지역 이름 — 바뀔 때만 화면에 뜬다 (태양계/카이퍼 벨트/오르트 구름/항성계명) */
   region = ''
   private regionCd = 0
+  private mapNearS = 1e9
 
   private readonly gas: Gas[] = []
   private gasIdx = 0
@@ -392,6 +393,7 @@ export class Voyage {
     this.cometCd = 0
     this.cruise = 1
     this.nearAny = Infinity
+    this.mapNearS = 1e9
     this.routeName = null
     this.routeDist = 0
     this.preyDist = Infinity
@@ -997,6 +999,10 @@ export class Voyage {
       if (dm < mapNear) mapNear = dm
     }
     if (mapNear === Infinity) mapNear = 1e9
+    // 평활 — 전방 집합이 바뀔 때마다 mapNear 가 계단식으로 튀면 순항 속도가
+    // "훅훅" 요동친다 (실플레이). 1.5/s 로 미끄러뜨린다.
+    this.mapNearS += (mapNear - this.mapNearS) * (1 - Math.exp(-1.5 * step))
+    mapNear = Math.min(mapNear, this.mapNearS)
     // 게이트는 둘뿐: 의미 있는 천체(내 30%+)가 2.5화면 안에 있는가 + 지도 제동.
     // preyDist(잔부스러기 폴백 포함)를 게이트에 넣으면 성간의 상수 밀도 잔챙이가
     // 거대 R 의 문턱 안에 언제나 있어 순항이 죽는다 (계측 0~5%). 잔챙이·한입거리는
@@ -1383,8 +1389,12 @@ export class Voyage {
         // 팽창은 먹이 **자신의** 이동분만 — 상대속도면 내 속도가 이중 계상돼
         // 순항(×6)에서 수천 px 드라이브바이 통로가 열린다 (적대 리뷰).
         // 내 이동은 위의 선분 스윕이 이미 담당한다.
+        // 중력 집속 — 고속 순항 중엔 회랑이 속도에 비례해 넓어진다 (실물리:
+        // 중력 집속 단면적. 실플레이 "성간에서 평범한 걸 못 먹어" — 지나가기만
+        // 하면 경로 주변이 항적으로 쓸려 들어온다. 정지 불필요).
         const bV = Math.hypot(b.vx, b.vy, b.vz)
-        if (d < R * 3.2 + b.r + bV * step) {
+        const focus = this.cruise > 2 ? Math.min(base * 2.5, sp0 * 0.05) : 0
+        if (d < R * 3.2 + b.r + bV * step + focus) {
           // 은하화 — 내가 크고 상대가 티끌이면 삼키지 않고 궤도에 가둔다.
           // 초대질량 블랙홀이 은하를 거느리는 방식 그대로: 영원히 돈다.
           if (R > 60 && b.r < R * 0.045 && this.halo.length < 380) {
