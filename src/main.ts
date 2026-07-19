@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three'
 import { Input } from './engine/input'
-import { LY } from './game/starmap'
+import { lyOf } from './game/starmap'
 import { STORE_KEY, Voyage, type Store } from './game/voyage'
 import { Scene3D } from './render3d/scene3d'
 
@@ -113,6 +113,25 @@ function boot(): void {
   let rankUntil = 0
   let lastRegion = ''
 
+  // 블랙홀 실험 — 버튼을 누르면 10초 카운트 후 30초에 걸쳐 붕괴 (사용자 사양).
+  // 누르기 전까지 나는 평범한 지구다: 아무것도 끌지도, 먹지도 않는다.
+  const expBtn = document.createElement('button')
+  expBtn.textContent = '블랙홀 실험 시작'
+  expBtn.style.cssText =
+    'position:absolute;right:16px;top:14px;font:700 14px/1.6 ui-monospace,monospace;' +
+    'color:#ffd9a8;background:rgba(24,14,6,.85);border:1px solid #d9a84c;padding:8px 16px;' +
+    'cursor:pointer;letter-spacing:.12em;display:none;'
+  expBtn.addEventListener('click', () => {
+    game.startExperiment()
+  })
+  ui.appendChild(expBtn)
+  const expEl = document.createElement('div')
+  expEl.style.cssText =
+    'position:absolute;right:16px;top:14px;text-align:right;pointer-events:none;' +
+    'font:800 18px/1.6 ui-monospace,monospace;color:#ffb066;white-space:pre;' +
+    'text-shadow:0 0 14px rgba(255,140,40,.55);display:none;'
+  ui.appendChild(expEl)
+
   let started = false
   const center = document.createElement('div')
   center.style.cssText =
@@ -129,14 +148,14 @@ function boot(): void {
       center.appendChild(d)
     }
     line('검은 입', 'font-size:56px;letter-spacing:.5em;color:#ffd9a8')
-    line('너는 지구 곁의, 티끌만 한 블랙홀이다', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
-    line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다', 'font-size:14px;color:#ffb066;line-height:2')
-    line('여긴 진짜 우주다 — 달부터. 그다음 행성. 그다음 태양.', 'font-size:14px;color:#8fa8c4;line-height:2')
+    line('너는 지구다 — 아직은.', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
+    line('우측 상단의 블랙홀 실험 버튼을 누르면 10초 뒤, 30초에 걸쳐 붕괴가 시작된다', 'font-size:14px;color:#ffb066;line-height:2')
+    line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다 — 달부터. 행성. 태양.', 'font-size:14px;color:#8fa8c4;line-height:2')
     line('카이퍼 벨트와 오르트 구름을 지나면, 빈 우주에선 성간 순항이 붙는다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
     line('나침반이 언제나 다음 별을 가리킨다 — 은하수는 넓고, 끝은 안드로메다 너머다', 'font-size:13px;color:#6f8299;line-height:2')
     line('이동 WASD · 상승 스페이스 · 하강 시프트', 'font-size:13px;color:#ffd9a8;line-height:2')
     line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · N 자동 항법 · H 질량 과부하(토글)', 'font-size:13px;color:#6f8299;line-height:2')
-    line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
+    line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 지구에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
         `— ${game.voyages}번째 항해 · 명부 ${game.journal.length} —`,
@@ -155,7 +174,8 @@ function boot(): void {
   const autoSteer = (): void => {
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
     const vh = game.camera.viewHeight
-    if (navPick && Math.hypot(navPick.x - game.x, navPick.y - game.y) < vh * 3) {
+    // 도착 판정은 3D — xy 만 보면 z 가 수백만 남은 채 항법이 풀린다 ("z좌표 버그")
+    if (navPick && Math.hypot(navPick.x - game.x, navPick.y - game.y, navPick.z - game.z) < vh * 3) {
       // 클릭 목적지 도착 — 항법을 끄고 그 자리에 선다 ("베가 찍고 바로 딴 데로": 실플레이)
       navPick = null
       autoNav = false
@@ -307,27 +327,47 @@ function boot(): void {
       arrow.style.opacity = '0'
     }
 
-    // 다음 항로 — 공허에서 게임이 안 끝났다고 말하는 줄
-    const lyd = game.routeDist / LY
+    // 다음 항로 — 공허에서 게임이 안 끝났다고 말하는 줄.
+    // 거리는 **실거리 광년** — 압축 좌표를 광년으로 나누면 마젤란(16만 광년)이
+    // "300광년"으로 뜨는 거짓말이 된다 (실플레이)
+    const fmtLy = (px: number): string => {
+      const v = lyOf(px)
+      return v >= 10000 ? `${(v / 10000).toFixed(1)}만 광년`
+        : v >= 0.1 ? `${v.toFixed(1)}광년` : `${Math.round(px / 1000)}k`
+    }
     const navTag = autoNav ? '  ·  자동 항법(N 해제)' : ''
     // 클릭 지정 목적지가 있으면 HUD 도 그걸 말한다 ("찍었는데 왜 프록시마": 실플레이)
     const routeLine = navPick
-      ? `\n지정 항로  ${navPick.name} · ${(Math.hypot(navPick.x - game.x, navPick.y - game.y) / LY).toFixed(1)}광년` +
+      ? `\n지정 항로  ${navPick.name} · ${fmtLy(Math.hypot(navPick.x - game.x, navPick.y - game.y, navPick.z - game.z))}` +
         (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '') + navTag
       : game.routeName
-      ? `\n다음 항로  ${game.routeName} · ${lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(game.routeDist / 1000)}k`}` +
+      ? `\n다음 항로  ${game.routeName} · ${fmtLy(game.routeDist)}` +
         (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '') + navTag
       : (game.cruise > 1.5 ? `\n성간 순항 ×${game.cruise.toFixed(1)}${navTag}` : navTag ? `\n${navTag.trim()}` : '')
-    // 성장은 반지름이 아니라 질량이다 — 소화 중(스트림)인 것도 이미 내 질량이다:
-    // 태양을 삼킨 직후 "지구 ×22" 같은 헛숫자를 막는다 (실플레이)
+    // 성장은 반지름이 아니라 질량이다 — 소화 중(스트림)인 것도 이미 내 질량이다.
+    // 지구 기준 = 시작 질량(volFor(15.6)≈64,690): 나는 지구 ×1 에서 시작한다
     const totalVol = game.vol + game.digesting
-    const mE = totalVol / 779
-    const mass = (mE >= 936
+    const mE = totalVol / 64690
+    const mass = (totalVol >= 729000
       ? `태양 ×${(totalVol / 729000).toFixed(totalVol / 729000 < 100 ? 1 : 0)}`
-      : mE >= 1
-        ? `지구 ×${mE >= 100 ? Math.round(mE) : mE.toFixed(1)}`
-        : `달 ×${Math.max(1, Math.round(totalVol / 15.6))}`) +
+      : `지구 ×${mE >= 100 ? Math.round(mE) : mE.toFixed(1)}`) +
       (game.digesting > totalVol * 0.05 ? ' (소화 중)' : '')
+    // 실험 카운트 — 우측 상단: 버튼 전엔 버튼, 카운트 중엔 초읽기
+    if (!game.expOn) {
+      expBtn.style.display = started ? 'block' : 'none'
+      expEl.style.display = 'none'
+    } else {
+      expBtn.style.display = 'none'
+      if (game.expT < 10) {
+        expEl.style.display = 'block'
+        expEl.textContent = `블랙홀화 시작  ${Math.ceil(10 - game.expT)}`
+      } else if (game.expT < 40) {
+        expEl.style.display = 'block'
+        expEl.textContent = `블랙홀화  ${Math.ceil(40 - game.expT)}`
+      } else {
+        expEl.style.display = 'none'
+      }
+    }
     coords.textContent =
       `${game.region || '태양계'}  ·  질량 ${mass}${surgeOn ? '  ·  과부하 ×1000' : ''}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +

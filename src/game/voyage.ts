@@ -345,6 +345,9 @@ export class Voyage {
   cruise = 1
   /** 궤도 관성 권위 0..1 — 지배 재진입 시 스냅 대신 서서히 (교차 검증 수리) */
   private domS = 0
+  /** 블랙홀 실험 — 버튼을 누르면 10초 카운트, 10~40초 붕괴, 40초 완성 (사용자 사양) */
+  expOn = false
+  expT = 0
   /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
   navAssist = false
   /** 클릭 지정 목적지 — 속도·제동·z 수렴이 전부 이 좌표 기준 (main 세팅) */
@@ -390,10 +393,23 @@ export class Voyage {
     return this.eatCount
   }
 
-  /** 지구→블랙홀 붕괴 진행 0..1 — 시작 30초(중력 유예와 같은 시계).
-   *  렌더가 이 값으로 지구 껍질을 조여 그린다 ("붕괴 과정 보여주고": 사용자) */
+  /** 지구→블랙홀 붕괴 진행 0..1 — 실험 버튼 후 10초 카운트, 10~40초 붕괴,
+   *  40초 완성 (사용자 사양). 버튼 전엔 영원히 평범한 지구다. */
   get morph(): number {
-    return Math.min(1, this.runT / 30)
+    return this.expOn ? Math.max(0, Math.min(1, (this.expT - 10) / 30)) : 0
+  }
+
+  /** 실지도 계 i 를 삼켰나 — 라벨 취소선용 ("자꾸 먹은 곳으로 가게 되네") */
+  sysEaten(i: number): boolean {
+    return this.eaten.has(MAP_IDS[i] ?? -1)
+  }
+
+  /** 블랙홀 실험 시작 — 버튼이 부른다. 한 번 시작하면 되돌릴 수 없다. */
+  startExperiment(): void {
+    if (!this.expOn) {
+      this.expOn = true
+      this.expT = 0
+    }
   }
 
   sfx(name: SfxName): void {
@@ -450,6 +466,8 @@ export class Voyage {
     this.cometCd = 0
     this.cruise = 1
     this.domS = 0
+    this.expOn = false
+    this.expT = 0
     this.runT = 0
     this.nearAny = Infinity
     this.mapNearS = 1e9
@@ -1076,9 +1094,13 @@ export class Voyage {
     // 30초부터 유효 질량 ×1000 이 기본이 된다 (3초 램프). H 홀드는 그 위에
     // 다시 ×1000 (합산 백만 배). 몸(vol)·기록은 불변.
     this.runT += step
-    const ramp = this.runT < 30 ? 0 : Math.min(1, (this.runT - 30) / 3)
+    if (this.expOn) this.expT += step
+    // 해방은 붕괴 완성(실험 40초)과 같은 순간 — 완전한 블랙홀이 되는 그 시점
+    const ramp = !this.expOn || this.expT < 40 ? 0 : Math.min(1, (this.expT - 40) / 3)
     const baseMul = 1 + 999 * ramp
-    const volE = this.vol * baseMul * (this.surge ? 1000 : 1)
+    // 소화 중(streamIn)도 이미 내 안의 질량이다 — 빼고 계산하면 대어 직후
+    // 과부하가 옛 질량 기준으로 돈다 ("토글 켤 때 기준인 것 같은데": 실플레이)
+    const volE = (this.vol + this.streamIn) * baseMul * (this.surge ? 1000 : 1)
     const surgeK = (1 + 25 * ramp) * (this.surge ? 26 : 1)
     // 줌 눈금 — 거대해질수록 R×26 → R×18 로 수렴: 무한 줌아웃이면 주변이 전부
     // 동전이 된다 (실플레이). 내 존재감과 이웃의 크기가 같이 자란다.
@@ -1130,7 +1152,11 @@ export class Voyage {
     // 도중 별을 mapNear 로 보면 전방에 별 하나만 걸려도 순항이 꺼지고, 내가
     // 끌고 다니는 수행단(포획 천체)이 nearAny 게이트를 영구히 눌러 배율이
     // 1에 고정된다 (실플레이 "1광년에 몇십 초": 계측 ~1,250px/s = 광년당 40초).
-    const navDist = this.navOn ? Math.hypot(this.navX - this.x, this.navY - this.y) : Infinity
+    // 3D 거리 — xy 만 보면 z 가 수백만 벌어진 목적지에서 "도착"이 나고
+    // z 수렴 예산(farNav)이 끊긴다 ("베텔게우스 클릭했는데 멀어져": 실플레이)
+    const navDist = this.navOn
+      ? Math.hypot(this.navX - this.x, this.navY - this.y, this.navZ - this.z)
+      : Infinity
     const brakeD = this.navOn ? navDist : mapNear
     // 게이트: 지정 항로는 제동 거리만 본다. 수동 순항은 둘 — 의미 있는 천체
     // (내 30%+)가 2.5화면 안에 있는가 + 지도 제동. preyDist(잔부스러기 폴백)를
@@ -1158,7 +1184,8 @@ export class Voyage {
     // 보너스가 남은 거리에 비례하므로, 지나친 뒤엔 멀어질수록 더 빨라지는
     // 폭주 피드백이 된다 (계측: 조향 없는 하네스에서 1.5e18 px/s 발산).
     const navAway = this.navOn &&
-      this.vx * (this.navX - this.x) + this.vy * (this.navY - this.y) < 0
+      this.vx * (this.navX - this.x) + this.vy * (this.navY - this.y) +
+        this.vz * (this.navZ - this.z) < 0
     const farNav = this.navOn
       ? navAway
         ? 0
@@ -1329,7 +1356,9 @@ export class Voyage {
             // prox 만 쓰면 태양급(중심거리 큼)은 감쇠가 사실상 0이라 근일점에서
             // 슬링샷 사출된다 ("궤도에 들어온 태양이 튕겨나가": 실플레이).
             // 과부하(H)는 추가 ×30.
-            const proxV = (R * 40) / (d + R * 40)
+            // 사거리 R·70 — R·40 은 원거리 포획체가 나선 없이 안정 원궤도로
+            // "평생 도는" 밴드를 남겼다 ("왜 안 빨려들어와": 실플레이)
+            const proxV = (R * 70) / (d + R * 70)
             const domV = Math.min(6, volE / (b.r * b.r * b.r + 1))
             const vr = vr0 > 0
               ? vr0
@@ -1697,7 +1726,9 @@ export class Voyage {
       const sy = this.y - prevY
       const segL2 = sx * sx + sy * sy
       outer: for (const b of this.active) {
-        if (this.absorbs.length >= 8) break
+        // 평범한 지구는 먹지 않는다 — 입은 붕괴가 시작되어야 열린다
+        // ("시작부터 지구 옆에 달이 흡수되는 거 맞냐": 실플레이)
+        if (this.morph <= 0) break
         if (b.r >= R * EDIBLE || this.eaten.has(b.id)) continue
         for (let i = 0; i < this.absorbs.length; i++) {
           if (this.absorbs[i]!.b.id === b.id) continue outer
@@ -1722,16 +1753,18 @@ export class Voyage {
         const relV2 = (b.vx - this.vx) ** 2 + (b.vy - this.vy) ** 2 + (b.vz - this.vz) ** 2
         const gfoc = Math.min(2.4, Math.sqrt(1 + (560 * R * (1 + R / 60)) / (relV2 + 900)))
         if (d < R * 3.2 * gfoc + b.r + bV * step + focus) {
-          // 은하화 — 내가 크고 상대가 티끌이면 삼키지 않고 궤도에 가둔다.
-          // 초대질량 블랙홀이 은하를 거느리는 방식 그대로: 영원히 돈다.
+          // 은하화 — 티끌은 삼키면서 **별빛만 헤일로에 남는다**. 종전엔 삼킴
+          // 없이 편입만 해서 큰 체급의 성장이 정체됐다 ("안 빨려들어오고 평생
+          // 돌아" + 질량 정체: 실플레이). 질량은 언제나 내 것이다.
           if (R > 60 && b.r < R * 0.045 && this.halo.length < 380) {
-            this.eaten.add(b.id)
-            const idx2 = this.active.indexOf(b)
-            if (idx2 >= 0) this.active.splice(idx2, 1)
             this.captureStar(b.id >>> 0, b.r, b.cr, b.cg, b.cb, 0)
+            this.swallow(b)
             continue
           }
-          // 프로즌 스타 — 큰 것일수록 지평선 앞에서 오래 얼어붙는다 (조사 ②-7)
+          // 프로즌 스타 — 큰 것일수록 지평선 앞에서 오래 얼어붙는다 (조사 ②-7).
+          // 슬롯 만석이면 이 천체만 다음 프레임 — 만석 break 는 명단 꼬리의
+          // 은하화 후보까지 영원히 굶겼다 (⑱ 계측: 30프레임 미포획)
+          if (this.absorbs.length >= 8) continue
           this.absorbs.push({ b, t: 0, dur: 0.16 + Math.min(0.9, (b.r / R) * 0.55) })
         }
       }

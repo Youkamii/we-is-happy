@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { hashSeed } from '../engine/rng'
-import { LY, STAR_MAP } from '../game/starmap'
+import { STAR_MAP, lyOf } from '../game/starmap'
 import { BodyKind, bhRadius, bodyRof, type Voyage } from '../game/voyage'
 
 /** 행성 대기 림 색 — 대기 조성이 곧 색이다 */
@@ -594,7 +594,9 @@ void main(){
   vec3 col = mix(vec3(1.0,0.36,0.12), vec3(1.15,1.3,1.55), smoothstep(0.55,1.0,T));
   // 호킹 색온도 — T∝1/M: 갓난 몸은 백열, 초대질량은 검붉게 식는다 (UI 없는 질량계)
   col *= mix(vec3(1.15,0.55,0.4), vec3(1.05,1.1,1.25), uTemp);
-  float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(max(r*r*r, 1e-4));
+  // 케플러 차등 회전 ω∝r^-1.5 — 폭식 중엔 안쪽 고리가 초당 수백 라디안으로
+  // 미쳐 돈다 (ISCO 공전 ~ms: 조사 반영, "초당 수백~수천 회전": 실플레이)
+  float phi = atan(vP.y,vP.x) - uTime*(1.7 + 6.0*uFeed)*inversesqrt(max(r*r*r, 1e-4));
   // 진짜 도플러 비밍 — β 케플러(안쪽이 빠름) × 시선 방향: 다가오는 쪽이 δ³ 배
   // 밝다 (조사 ②-14 — 가짜 sin 항 폐기). 카메라만 돌려도 초승달이 따라 돈다.
   vec2 tang = vec2(-vP.y, vP.x)/max(r, 1e-3);
@@ -859,6 +861,7 @@ void main(){
     let labelN = 0
     const placedLb: [number, number][] = []
     const skyR = dist * 30
+    const d3s: number[] = []
     for (let i = 0; i < STAR_MAP.length; i++) {
       const sys = STAR_MAP[i]!
       const sp = this.landmarks[i]!
@@ -866,9 +869,12 @@ void main(){
       const dy = sys.z - py
       const dz = sys.y - pz
       const d3 = Math.hypot(dx, dy, dz) || 1
-      const near12 = d3 < dist * 12
-      if (near12) {
-        sp.visible = false // 실제 지오메트리가 보이는 거리 — 별점만 물러난다
+      d3s.push(d3)
+      // 별점은 실물 지오메트리가 읽히는 거리까지 산다 — 12화면 일괄 컷은 그
+      // 사이 암흑 구간을 만들었다 ("가까이 가면 안 보인다": 실플레이)
+      const nearGeo = d3 < Math.max(dist * 4, sys.r * 40)
+      if (nearGeo) {
+        sp.visible = false
       } else {
         sp.visible = true
         sp.position.set(px + (dx / d3) * skyR, py + (dy / d3) * skyR, pz + (dz / d3) * skyR)
@@ -876,31 +882,49 @@ void main(){
         sp.scale.setScalar(skyR * 0.01 * imp)
         sp.material.opacity = sys.kind === 'sun' ? 0.6 : 0.38
       }
-      // 라벨은 도착 직전(2화면)까지 실제 위치에 붙어 남는다 — 별점이 꺼진 뒤
-      // 표식까지 잃으면 "가까워지면 대상을 못 찾는다" (실플레이)
-      if (near12 && d3 < dist * 2) continue
-      // 라벨 — 화면 안에 있고 가까운 순 다섯. 겹치면 아래로 밀어낸다 (실플레이).
-      // 근접(별점 꺼짐) 시엔 실제 좌표로 투영 — 1광년 안에서 표식을 잃지 않는다
-      if (labelN < 5) {
-        if (near12) this.v3.set(sys.x, sys.z, sys.y).project(this.camera)
-        else this.v3.copy(sp.position).project(this.camera)
-        if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
-          this.labelSysIdx[labelN] = i
-          const lb = this.labels[labelN++]!
-          lb.style.display = 'block'
-          const lx = ((this.v3.x + 1) / 2) * w0 + 8
-          let lyy = ((1 - this.v3.y) / 2) * h0 - 6
-          for (let rep = 0; rep < 4; rep++) {
-            for (const p of placedLb) {
-              if (Math.abs(lyy - p[1]) < 16 && Math.abs(lx - p[0]) < 180) lyy = p[1] + 18
-            }
+    }
+    // 라벨은 **가까운 순** 다섯 — 지도 배열 순이면 화면에 걸린 앞 계들이 슬롯을
+    // 전부 훔쳐 목적지 라벨이 사라진다 ("3광년 미만인데 찾을 수가 없네": 실플레이).
+    // 클릭 목적지는 무조건 1순위 핀.
+    const ord = d3s.map((_, i) => i).sort((a, b) => {
+      const sa = STAR_MAP[a]!
+      const sb = STAR_MAP[b]!
+      const pa = g.navOn && sa.x === g.navX && sa.y === g.navY ? -1e18 : 0
+      const pb = g.navOn && sb.x === g.navX && sb.y === g.navY ? -1e18 : 0
+      return d3s[a]! + pa - (d3s[b]! + pb)
+    })
+    for (const i of ord) {
+      if (labelN >= 5) break
+      const sys = STAR_MAP[i]!
+      const sp = this.landmarks[i]!
+      const d3 = d3s[i]!
+      const pinned = g.navOn && sys.x === g.navX && sys.y === g.navY
+      // 도착 코앞(1.2화면)에서만 접는다 — 목적지 핀은 항법이 풀릴 때까지 남는다
+      if (!sp.visible && d3 < dist * 1.2 && !pinned) continue
+      if (sp.visible) this.v3.copy(sp.position).project(this.camera)
+      else this.v3.set(sys.x, sys.z, sys.y).project(this.camera)
+      if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
+        this.labelSysIdx[labelN] = i
+        const lb = this.labels[labelN++]!
+        lb.style.display = 'block'
+        const lx = ((this.v3.x + 1) / 2) * w0 + 8
+        let lyy = ((1 - this.v3.y) / 2) * h0 - 6
+        for (let rep = 0; rep < 4; rep++) {
+          for (const p of placedLb) {
+            if (Math.abs(lyy - p[1]) < 16 && Math.abs(lx - p[0]) < 180) lyy = p[1] + 18
           }
-          placedLb.push([lx, lyy])
-          lb.style.left = `${lx}px`
-          lb.style.top = `${lyy}px`
-          const lyd = d3 / LY
-          lb.textContent = `${sys.name} · ${lyd >= 1 ? `${lyd.toFixed(1)}광년` : `${Math.round(d3 / 1000)}k`}`
         }
+        placedLb.push([lx, lyy])
+        lb.style.left = `${lx}px`
+        lb.style.top = `${lyy}px`
+        // 실거리 광년 — 압축 좌표를 그대로 나누면 마젤란이 "300광년"이 된다
+        const lyd = lyOf(d3)
+        lb.textContent = `${sys.name} · ${lyd >= 10000 ? `${(lyd / 10000).toFixed(1)}만 광년`
+          : lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(d3 / 1000)}k`}`
+        // 먹은 계는 붉은 취소선 — "자꾸 먹은 곳으로 가게 되네" (실플레이)
+        const gone = g.sysEaten(i)
+        lb.style.color = gone ? '#e05555' : '#c9a35f'
+        lb.style.textDecoration = gone ? 'line-through' : 'none'
       }
     }
     for (let i = labelN; i < 5; i++) {

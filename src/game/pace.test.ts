@@ -12,8 +12,9 @@ function eatTime(targetName: string, myR: number): number {
   const g = new Voyage()
   g.start(null)
   g.vol = volFor(myR)
-  // 붕괴 완료 시점에서 잰다 — 실플레이의 공성은 전부 30초 이후(×1000 기저)다
-  ;(g as unknown as { runT: number }).runT = 33
+  // 실험 완료 시점에서 잰다 — 실플레이의 공성은 전부 붕괴 완료 후(×1000 기저)다
+  g.expOn = true
+  g.expT = 43
   const t = g.active.find((b) => nameOf(b.id)?.name === targetName)
   if (!t) return -1
   const id = t.id

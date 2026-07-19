@@ -17,6 +17,12 @@ export function pxOf(ly: number): number {
   return ly <= 16 ? ly * LY : LY * (16 + 34 * Math.log(ly / 16))
 }
 
+/** 게임 px → 실거리 광년 (pxOf 역함수) — 압축 좌표를 그대로 광년으로 나누면
+ *  마젤란(16만 광년)이 "300광년"으로 뜬다 (실플레이). 표시는 실거리로. */
+export function lyOf(px: number): number {
+  return px <= 16 * LY ? px / LY : 16 * Math.exp((px / LY - 16) / 34)
+}
+
 export interface MapPlanet {
   readonly name: string
   readonly r: number

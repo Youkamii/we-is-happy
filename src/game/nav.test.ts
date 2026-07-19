@@ -67,7 +67,7 @@ describe('항행·충돌·지구 시작', () => {
     expect(survivors[0]!.r).toBeCloseTo(wantR, 1)
   })
 
-  it('㉔ 지구 시작 — 지구 질량으로 눈뜨고, 지도의 지구는 없다', () => {
+  it('㉔ 지구 시작 — 실험 버튼 전엔 평범한 지구, 버튼 후 40초에 완전한 블랙홀', () => {
     const g = new Voyage()
     g.start(null)
     expect(g.morph).toBe(0)
@@ -75,7 +75,11 @@ describe('항행·충돌·지구 시작', () => {
     expect(g.radius).toBeLessThan(18)
     const ghost = g.active.find((b) => nameOf(b.id)?.name === '지구')
     expect(ghost).toBeUndefined()
-    for (let s = 0; s < 610; s++) g.update(mockInput(0, 0), 0.05)
+    // 버튼을 안 누르면 영원히 지구다 — 시간이 흘러도 morph 0
+    for (let s = 0; s < 200; s++) g.update(mockInput(0, 0), 0.05)
+    expect(g.morph).toBe(0)
+    g.startExperiment()
+    for (let s = 0; s < 810; s++) g.update(mockInput(0, 0), 0.05)
     expect(g.morph).toBe(1)
   })
 })

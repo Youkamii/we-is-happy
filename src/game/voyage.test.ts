@@ -41,8 +41,11 @@ function memStore(): Store & { raw: string | null } {
   }
 }
 
-/** 먹이 위에 올라타서 삼킨다 — 레일 위 천체는 움직이므로 매 틱 붙는다 (z 포함) */
+/** 먹이 위에 올라타서 삼킨다 — 레일 위 천체는 움직이므로 매 틱 붙는다 (z 포함).
+ *  입은 실험(붕괴) 완료 후에만 열리므로 시계를 완료 시점으로 감아 둔다. */
 function chase(g: Voyage, prey: Body, frames: number): void {
+  g.expOn = true
+  if (g.expT < 43) g.expT = 43
   const input = mockInput(0, 0)
   for (let s = 0; s < frames; s++) {
     g.x = prey.x
@@ -86,7 +89,8 @@ describe('검은 입', () => {
   it('③ 나보다 큰 것은 한입에 못 삼킨다 — 대신 곁에서 뜯는다', () => {
     const g = new Voyage()
     g.start(null)
-    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 성숙한 블랙홀의 힘
+    g.expOn = true
+    g.expT = 43 // 실험 완료 시점 — 성숙한 블랙홀의 힘
     const big = g.active.find((b) => b.r > g.radius * 2)
     expect(big, '큰 천체가 있다 (태양)').toBeTruthy()
     const input = mockInput(0, 0)
@@ -176,7 +180,8 @@ describe('검은 입', () => {
     expect(moon, '달이 있다').toBeTruthy()
     const host = moon!.host!
     g.vol = volFor(host.r * 2)
-    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 섭동은 성숙한 힘
+    g.expOn = true
+    g.expT = 43 // 실험 완료 시점 — 성숙한 블랙홀의 힘
     const input = mockInput(0, 0)
     for (let s = 0; s < 30; s++) {
       g.x = moon!.x + g.radius * 1.9
@@ -198,7 +203,8 @@ describe('검은 입', () => {
     expect(target, '대상 천체가 있다 (천왕성쯤)').toBeTruthy()
     const R = target!.r / 0.9
     g.vol = volFor(R)
-    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 조석은 성숙한 힘
+    g.expOn = true
+    g.expT = 43 // 실험 완료 시점 — 성숙한 블랙홀의 힘
     g.x = target!.x + (R + target!.r) * 1.1
     g.y = target!.y
     g.z = target!.z
@@ -341,6 +347,8 @@ describe('검은 입', () => {
 
     const g2 = new Voyage()
     g2.start(null)
+    g2.expOn = true
+    g2.expT = 43 // 입은 실험 완료 후에만 열린다
     g2.vol = 9000
     const prey = g2.active.find((b) => b.r < g2.radius * 0.7 && b.r > 2)!
     prey.free = true
@@ -383,7 +391,8 @@ describe('검은 입', () => {
     g.start(null)
     const venus = g.active.find((b) => nameOf(b.id)?.name === '금성')!
     g.vol = volFor(2) // 땅콩 — 지구 시작 질량을 내려놓고 잠식만 잰다
-    ;(g as unknown as { runT: number }).runT = 33 // 붕괴 완료 — 잠식은 성숙한 힘
+    g.expOn = true
+    g.expT = 43 // 실험 완료 시점 — 성숙한 블랙홀의 힘
     const r0 = venus.r
     const vol0 = g.vol
     const input = mockInput(0, 0)
@@ -402,9 +411,11 @@ describe('검은 입', () => {
     expect(g.vol, '깎인 것은 스트림으로 내 것이 된다').toBeGreaterThan(vol0 + 3)
   })
 
-  it('⑱ 은하화 — 거대해지면 잔챙이는 삼켜지지 않고 나를 영원히 돈다', () => {
+  it('⑱ 은하화 — 잔챙이는 삼켜지고, 별빛은 헤일로로 남아 나를 돈다', () => {
     const g = new Voyage()
     g.start(null)
+    g.expOn = true
+    g.expT = 43 // 입은 실험 완료 후에만 열린다
     g.vol = volFor(70) // R 70 — 은하화 문턱(60) 위
     const victim = g.active[0]!
     const tiny = {
