@@ -53,6 +53,18 @@ const MAW_PULL = 3
 const EDDINGTON = 5400
 /** 로슈 접근 배율 — (R + r) 의 이 배수 안이면 조석 파괴 */
 const ROCHE = 1.3
+/** 밀도 의존 조석 반경 — R_T ∝ (M/ρ)^⅓: 바위는 툭 삼켜지고 별·성운은 멀리서
+ * 국수처럼 풀린다 (조사 ②-2, Rees/로슈) */
+function rocheOf(kind: BodyKindType): number {
+  switch (kind) {
+    case BodyKind.Rock:
+    case BodyKind.Ringed: return 1.05
+    case BodyKind.Sun: return 1.55
+    case BodyKind.Garden:
+    case BodyKind.Core: return 1.7
+    default: return 1.15
+  }
+}
 /** 삼킨 부피의 성장 환산 배율 */
 const ABSORB_GAIN = 1.15
 /**
@@ -94,7 +106,8 @@ export function bodyRof(radius: number): number {
   return Math.min(radius, Math.max(0.5, volFor(radius) * 5.8e-9))
 }
 /** 조석 파괴에서 가스 스트림으로 흘러드는 비율 — 통째보다 손해: 조급함의 세금 */
-const SHRED_STREAM = 0.75
+/** 잔해 반반 법칙 — 조석 파괴 질량의 절반만 강착, 절반은 탈속박 사출 (Rees 1988) */
+const SHRED_STREAM = 0.5
 /** 조석 파괴가 남기는 고체 심(얼음 핵) 반지름 배율 */
 const SHRED_CORE = 0.42
 
@@ -341,6 +354,11 @@ export class Voyage {
   /** 소화 중인 질량 — 이미 내 것이지만 아직 몸에 반영 안 된 것 (HUD 합산용) */
   get digesting(): number {
     return this.streamIn
+  }
+
+  /** 베켄슈타인-호킹 엔트로피 — S ∝ M² (지평선 면적). 절대 줄지 않는 성장 눈금 */
+  get entropy(): number {
+    return this.vol * this.vol
   }
 
   get eatenThisRun(): number {
@@ -998,7 +1016,12 @@ export class Voyage {
     let mapNear = ahead(800, 800)
       ? Math.hypot(800 - this.x, 800 - this.y, this.z) - SHELL.oortIn
       : Infinity
+    // 전방향 최근접(도착 판정용) — 전방 필터를 쓰면 도착한 계가 "뒤"로 빠져
+    // 항로가 다음 계를 미리 가리킨다 (실플레이: 카리나에서 오메가 표시)
+    let mapNearAll = Math.hypot(800 - this.x, 800 - this.y) - SHELL.oortIn
     for (const s of STAR_MAP) {
+      const dxy = Math.hypot(s.x - this.x, s.y - this.y) - s.r
+      if (dxy < mapNearAll) mapNearAll = dxy
       if (!ahead(s.x, s.y)) continue
       const dm = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z) - s.r
       if (dm < mapNear) mapNear = dm
@@ -1015,6 +1038,12 @@ export class Voyage {
     const empty = this.nearAny > base * 2.5 && mapNear > spNow * 1.4 + base * 8
     const ck = empty && this.thrusting ? 0.7 : 4.5
     this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
+    // 순항 z 수렴 — 별들이 구형으로 흩어진 우주에서 수동 xy 비행만으로도
+    // 목적지 층에 닿아야 한다: 순항 중엔 나침반 표적의 z 로 미끄러져 간다
+    // (실플레이: "성운 도착했는데 아무것도 안 보여" — 목적지가 발밑 수백만 px)
+    if (this.cruise > 2 && this.preyDist < 1e8) {
+      this.vz += (this.preyZ - this.z) * Math.min(0.6, this.cruise * 0.09) * step
+    }
     // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
     const acc = thrustAcc(R) * this.cruise +
       (this.cruise > 3 ? Math.min(400000, mapNear * 0.06) : 0)
@@ -1111,7 +1140,7 @@ export class Voyage {
           // ("내가 쟤 위치까지 가야만 따라와": 실플레이 — 사거리 R·20→R·34)
           if (edibleB) {
             const near = (R * 34) / (d + R * 34)
-            g = Math.min(capMe, g + 230 * heavy * near * near)
+            g = Math.min(capMe, g + 320 * heavy * near * near) // 흡입 상향 (실플레이)
           }
           if (!b.free && b.orbR > 0) {
             const bind = Math.abs(b.orbW * b.orbW * b.orbR)
@@ -1124,6 +1153,20 @@ export class Voyage {
             // 소용돌이는 우물 안쪽의 것 — 멀리서는 직류로 흘러들어야 낙하가 된다
             // (베이스 0.45 를 원거리에 주면 먹이가 낙하 대신 궤도를 돈다: 계측)
             const swirl = Math.min(0.86, prox * (2.2 + FRAME_DRAG))
+            // 에르고스피어 강제 동조 — 몸(bodyR)의 2.2배 안에서는 역행이 물리적
+            // 으로 불가능하다: 상대 접선 속도를 내 스핀 방향(반시계)으로 강제
+            // 정렬 (조사 ②-4, 커 시공 틀 끌림 ω∝r⁻³)
+            if (d < bodyRof(R) * 2.2 + b.r) {
+              const txE = -dy / d
+              const tyE = dx / d
+              const rvxE = b.vx - this.vx
+              const rvyE = b.vy - this.vy
+              const tv = rvxE * txE + rvyE * tyE
+              const kE = 1 - Math.exp(-8 * step)
+              const want = Math.abs(tv)
+              b.vx += (txE * want - (rvxE * txE) * txE) * kE * (tv < 0 ? 2 : 0)
+              b.vy += (tyE * want - (rvyE * tyE) * tyE) * kE * (tv < 0 ? 2 : 0)
+            }
             const gr = g * (1 - swirl * prox)
             const gt = g * swirl
             const dxy = Math.hypot(dx, dy) || 1
@@ -1264,7 +1307,7 @@ export class Voyage {
       // 초민감한 다이얼이다. 만질 땐 반드시 봇 재실측).
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        this.vol * 0.06 * step,
+        this.vol * 0.075 * step, // 흡입(소화) 상향 6→7.5%/s (실플레이 — 봇 재실측 게이트)
       )
       this.vol += take
       this.streamIn -= take
@@ -1357,7 +1400,21 @@ export class Voyage {
       if (b.hot || this.eaten.has(b.id)) continue
       if (b.r < R * EDIBLE || b.r >= R) continue
       const d = Math.hypot(b.x - this.x, b.y - this.y, b.z - this.z)
-      if (d < (R + b.r) * ROCHE) (toShred ??= []).push(b)
+      // 힐스 침묵 — 초대질량이 되면 조석 반경이 지평선 안으로 들어가 별이
+      // 찢기지 않고 **소리 없이 통째로** 사라진다 (조사 ②-12, ~10⁸M☉ 상전이).
+      // 파괴의 미학이 화려함에서 소름끼치는 정적으로 반전되는 순간.
+      const rT = (R + b.r) * ROCHE * rocheOf(b.kind)
+      if (d < rT) {
+        if (rT < bodyRof(R) * 2.6) {
+          this.eaten.add(b.id)
+          const qi = this.active.indexOf(b)
+          if (qi >= 0) this.active.splice(qi, 1)
+          this.vol += b.r * b.r * b.r * ABSORB_GAIN
+          this.gulp = Math.max(this.gulp, 0.3)
+          continue
+        }
+        ;(toShred ??= []).push(b)
+      }
     }
     if (toShred) for (const b of toShred) this.shred(b)
 
@@ -1402,7 +1459,11 @@ export class Voyage {
         // 하면 경로 주변이 항적으로 쓸려 들어온다. 정지 불필요).
         const bV = Math.hypot(b.vx, b.vy, b.vz)
         const focus = this.cruise > 2 ? Math.min(base * 2.5, sp0 * 0.05) : 0
-        if (d < R * 3.2 + b.r + bV * step + focus) {
+        // 중력 집속 입 — σ = πR²(1+v_esc²/v_rel²): 느리게 나란히 날수록 보이지
+        // 않는 입이 커진다 (조사 ②-1). 상한 √6 — 발산 방지.
+        const relV2 = (b.vx - this.vx) ** 2 + (b.vy - this.vy) ** 2 + (b.vz - this.vz) ** 2
+        const gfoc = Math.min(2.4, Math.sqrt(1 + (560 * R * (1 + R / 60)) / (relV2 + 900)))
+        if (d < R * 3.2 * gfoc + b.r + bV * step + focus) {
           // 은하화 — 내가 크고 상대가 티끌이면 삼키지 않고 궤도에 가둔다.
           // 초대질량 블랙홀이 은하를 거느리는 방식 그대로: 영원히 돈다.
           if (R > 60 && b.r < R * 0.045 && this.halo.length < 380) {
@@ -1412,7 +1473,8 @@ export class Voyage {
             this.captureStar(b.id >>> 0, b.r, b.cr, b.cg, b.cb, 0)
             continue
           }
-          this.absorbs.push({ b, t: 0, dur: 0.22 + Math.min(0.35, (b.r / R) * 0.4) })
+          // 프로즌 스타 — 큰 것일수록 지평선 앞에서 오래 얼어붙는다 (조사 ②-7)
+          this.absorbs.push({ b, t: 0, dur: 0.16 + Math.min(0.9, (b.r / R) * 0.55) })
         }
       }
     }
@@ -1569,6 +1631,13 @@ export class Voyage {
       const mg = this.merging
       mg.t += step
       mg.w += step * 11 // 처프 — 미친듯이 빨라진다
+      // 이체 상호낙하 — 나도 질량중심으로 끌려간다: 동급일수록 내 몸이 크게
+      // 흔들리며 상대에게 다가간다 (조사 ②-5, "서로 가까워져야"의 문자적 구현)
+      {
+        const mf = mg.vol / (mg.vol + this.vol)
+        this.vx += Math.cos(mg.ang) * mg.rad * mf * 3.2 * step
+        this.vy += Math.sin(mg.ang) * mg.rad * mf * 3.2 * step
+      }
       mg.ang += mg.w * step
       mg.rad *= Math.exp(-1.5 * step)
       mg.z *= Math.exp(-2 * step)
@@ -1577,6 +1646,15 @@ export class Voyage {
       if (mg.rad < Math.max(2, R * 0.55) || mg.t > 2.6) {
         // 합병 완성 — 중력파가 퍼지고, 질량은 영상처럼 부풀어 들어온다
         this.streamIn += mg.vol * ABSORB_GAIN
+        // 반동 킥 — 비대칭 중력파 방출의 반작용: 동급 합병일수록 세게 걷어차인다
+        // (조사 ②-6, GW200129 실측 ~1542km/s). 잔해가 튕겨 나가는 손맛.
+        {
+          const mf = mg.vol / (mg.vol + this.vol)
+          const kick = 620 * Math.pow(4 * mf * (1 - mf), 2)
+          this.vx -= Math.cos(mg.ang) * kick
+          this.vy -= Math.sin(mg.ang) * kick
+          this.camera.shake(4 + kick * 0.01, 8)
+        }
         this.gulp = 1
         this.feed = 1
         if (rr > this.biggestMeal) this.biggestMeal = Math.round(rr)
@@ -1711,7 +1789,7 @@ export class Voyage {
     // 내건다. 곁의 간식 유무로 껐다 켜면 분당 수 회 깜빡인다 (적대 리뷰 실측).
     // "태양 한번 먹고 더 할 게 없어"의 수리: 우주는 안 끝났다고 화면이 말해야 한다.
     this.routeName = null
-    if (mapNear > base * 4) {
+    if (mapNearAll > base * 4) {
       let best = Infinity
       let bi = -1
       for (let i = 0; i < STAR_MAP.length; i++) {
@@ -1925,6 +2003,16 @@ export class Voyage {
         Math.cos(a) * (60 + t * 200) + b.vx, Math.sin(a) * (60 + t * 200) + b.vy, b.vz * 0.5,
         b.r * (0.35 + t * 0.3), Math.min(1.3, b.cr * 1.4), b.cg * 0.9, b.cb * 0.7,
         0.9 + t * 0.9)
+    }
+    // 탈속박 사출 — 절반은 내 것이 아니다 (반반 법칙, Rees 1988): 고속 리본으로
+    // 계 밖으로 튕겨 나간다. 조급함의 세금이 실물리가 됐다.
+    for (let i = 0; i < 6; i++) {
+      const t2 = i / 6
+      const a2 = Math.atan2(b.y - this.y, b.x - this.x) - 0.9 + t2 * 0.55
+      const spd = 900 + this.radius * 6
+      this.spawnGas(b.x, b.y, b.z,
+        Math.cos(a2) * spd + b.vx, Math.sin(a2) * spd + b.vy, (t2 - 0.5) * spd * 0.3,
+        b.r * 0.3, 1.25, 1.05, 0.85, 1.6)
     }
     // 단단한 심 — 재회수 가능한 얼음 (질량 소수)
     this.spawnCores(b)

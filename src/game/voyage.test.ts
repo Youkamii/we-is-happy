@@ -516,9 +516,10 @@ describe('검은 입', () => {
     // 티끌 시작(R1.8) + 질량 비례 소화 6%/s — 2분에 R~21 (실측 20.7).
     // "먹는 속도 올려"(실플레이)로 5%→6% 상향: 태양계 1막 ~4분, 한 끼 소화가
     // 눈에 띄게 빨라진다. 몸(bodyR)은 분리돼 있어 화면 폭주는 없다.
-    expect(g.radius, '2분 뒤 반지름 (실측 20.7)').toBeGreaterThan(8)
-    // 압도감 계약 — 2분 만에 행성 사냥꾼(30)을 넘으면 우주가 작아진다 (과속 금지)
-    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(26)
+    expect(g.radius, '2분 뒤 반지름 (실측 30.0 — 흡입 상향 지시 반영)').toBeGreaterThan(8)
+    // 과속 상한 — 압도감은 이제 몸/영향권 분리·색온도가 담당하므로 넉넉히.
+    // 사용자 지시("흡입 속도 올려")로 26→34 완화 (실측 30.0).
+    expect(g.radius, `과속 금지 (r=${g.radius.toFixed(1)})`).toBeLessThan(34)
     expect(worstStarve, '최장 기아 구간(초)').toBeLessThan(30)
   })
 })

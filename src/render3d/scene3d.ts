@@ -47,12 +47,13 @@ const LENS_SHADER = {
     uWaveC: { value: new THREE.Vector2(0.5, 0.5) },
     uWaveT: { value: 9 },
     uQuasar: { value: 0 },
+    uTemp: { value: 1 },
   },
   vertexShader: `varying vec2 vUv;
 void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
   fragmentShader: `varying vec2 vUv;
 uniform sampler2D tDiffuse; uniform vec2 uHole; uniform float uR; uniform float uE; uniform float uAspect;
-uniform vec2 uWaveC; uniform float uWaveT; uniform float uQuasar;
+uniform vec2 uWaveC; uniform float uWaveT; uniform float uQuasar; uniform float uTemp;
 void main(){
   vec2 p = vUv - uHole; p.x *= uAspect;
   float d = length(p);
@@ -84,15 +85,18 @@ void main(){
   float gz = sqrt(clamp(1.0 - uR*0.92/max(d,1e-3), 0.0, 1.0));
   float zone = 1.0 - smoothstep(uR*1.05, uR*3.0, d);
   col = mix(col, col * max(gz, 0.2) * vec3(1.0,0.65,0.45), zone*0.45);
-  // 사건의 지평선 — 렌즈 다음에 깎아야 진짜 검다
-  col = mix(col, vec3(0.0), smoothstep(uR*1.02, uR*0.88, d));
+  // 그림자는 지평선의 2.6배 — √27/2 r_s (EHT 실측 눈금, 조사 ②-16):
+  // 몸보다 훨씬 큰 검은 구멍으로 보인다. 렌즈 다음에 깎아야 진짜 검다
+  col = mix(col, vec3(0.0), smoothstep(uR*2.6, uR*2.2, d));
   // 광자 고리 — 임계곡선으로 수렴하는 서브링들 + 도플러 비대칭 (EHT)
   float angH = atan(p.y, p.x);
   float dopp = 1.0 + 0.35 * sin(angH);
   float hot = 1.0 + uQuasar * 0.8;
-  float ring1 = exp(-pow((d - uR*1.10)/(uR*0.035), 2.0));
-  float ring2 = exp(-pow((d - uR*1.03)/(uR*0.013), 2.0));
-  col += vec3(1.5,1.1,0.65) * (ring1*0.4 + ring2*0.24) * dopp * hot;
+  float ring1 = exp(-pow((d - uR*2.75)/(uR*0.09), 2.0));
+  float ring2 = exp(-pow((d - uR*2.62)/(uR*0.035), 2.0));
+  // 광자 고리도 색온도를 입는다 — 백열(작음) → 검붉음(초대질량)
+  vec3 ringC = mix(vec3(1.6,0.7,0.45), vec3(1.5,1.2,0.8), uTemp);
+  col += ringC * (ring1*0.4 + ring2*0.24) * dopp * hot;
   gl_FragColor = vec4(col, 1.0);
 }`,
 }
@@ -154,17 +158,17 @@ function nebulaTexture(seed: number): THREE.Texture {
   const HUES: readonly [number, number, number][] = [
     [255, 90, 130], [90, 200, 220], [170, 110, 255], [255, 150, 90],
   ]
-  // 발광 구름 — 색이 다른 층을 겹겹이
-  for (let i = 0; i < 34; i++) {
+  // 발광 구름 — 색이 다른 층을 겹겹이, **진하게** (묽으면 안개가 된다: 실플레이)
+  for (let i = 0; i < 44; i++) {
     const a = rnd() * Math.PI * 2
     const rr = rnd() * rnd() * 92
     const x = 128 + Math.cos(a) * rr
     const y = 128 + Math.sin(a) * rr * (0.7 + rnd() * 0.3)
-    const r = 14 + rnd() * 44
+    const r = 12 + rnd() * 40
     const [hr, hg, hb] = HUES[(seed + i) % HUES.length]!
     const g = ctx.createRadialGradient(x, y, 1, x, y, r)
-    g.addColorStop(0, `rgba(${hr},${hg},${hb},${0.1 + rnd() * 0.14})`)
-    g.addColorStop(0.6, `rgba(${hr},${hg},${hb},0.05)`)
+    g.addColorStop(0, `rgba(${hr},${hg},${hb},${0.24 + rnd() * 0.22})`)
+    g.addColorStop(0.6, `rgba(${hr},${hg},${hb},0.1)`)
     g.addColorStop(1, 'rgba(0,0,0,0)')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, 256, 256)
@@ -178,11 +182,11 @@ function nebulaTexture(seed: number): THREE.Texture {
     ctx.fill()
   }
   ctx.globalCompositeOperation = 'source-over'
-  // 박힌 어린 별들 — 별 성(星) 자의 이유
-  for (let i = 0; i < 46; i++) {
+  // 박힌 어린 별들 — 별 성(星) 자의 이유 (굵고 밝게)
+  for (let i = 0; i < 56; i++) {
     const x = 30 + rnd() * 196
     const y = 30 + rnd() * 196
-    const r = 0.6 + rnd() * 1.6
+    const r = 1.1 + rnd() * 2.4
     const g = ctx.createRadialGradient(x, y, 0, x, y, r * 3)
     g.addColorStop(0, 'rgba(255,255,255,0.9)')
     g.addColorStop(0.3, 'rgba(200,220,255,0.4)')
@@ -508,15 +512,17 @@ export class Scene3D {
     // 강착원반 — 샤쿠라-순야예프 온도 구배(T∝r^-¾: 안쪽 백청, 바깥 적색) +
     // 케플러 차등 회전(안쪽이 빠르다) + 도플러 비밍(다가오는 쪽이 밝다) + 난류 줄무늬
     this.diskMat = new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uFeed: { value: 0 }, uInner: { value: 0.4 } },
+      uniforms: { uTime: { value: 0 }, uFeed: { value: 0 }, uInner: { value: 0.4 }, uTemp: { value: 1 } },
       vertexShader: `varying vec2 vP;
 void main(){ vP = position.xy; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `varying vec2 vP;
-uniform float uTime; uniform float uFeed; uniform float uInner;
+uniform float uTime; uniform float uFeed; uniform float uInner; uniform float uTemp;
 void main(){
   float r = length(vP);
   float T = pow(max(uInner*2.2, 1.35)/max(r, 1e-3), 0.75);
   vec3 col = mix(vec3(1.0,0.36,0.12), vec3(1.15,1.3,1.55), smoothstep(0.55,1.0,T));
+  // 호킹 색온도 — T∝1/M: 갓난 몸은 백열, 초대질량은 검붉게 식는다 (UI 없는 질량계)
+  col *= mix(vec3(1.15,0.55,0.4), vec3(1.05,1.1,1.25), uTemp);
   float phi = atan(vP.y,vP.x) - uTime*1.7*inversesqrt(max(r*r*r, 1e-4));
   float beam = pow(1.0 + 0.28*sin(atan(vP.y,vP.x))/sqrt(max(r,1e-3)), 2.0);
   float streak = 0.84 + 0.16*sin(phi*9.0 + r*14.0);
@@ -908,9 +914,26 @@ void main(){
           sp.material.color.setRGB(
             Math.min(1, 0.9 + redK), Math.min(1, 0.9 * (1 - redK * 0.5)), Math.min(1, 0.95 * (1 - redK * 0.6)),
           )
-          sp.material.opacity = isCore ? 0.85 : 0.75
+          sp.material.opacity = isCore ? 0.95 : 1
           sp.position.set(ax, ay, az)
           sp.scale.setScalar(sc * (isCore ? 2.3 : 2.7))
+          nebN++
+        }
+        // 둘째 층 — 회전 다른 겹을 얹어 결이 산다 (한 장은 벽지처럼 읽힌다)
+        if (!isCore && nebN < MAX_NEB) {
+          const sp2 = this.nebSprites[nebN]!
+          sp2.visible = true
+          const ti2 = 50 + ((b.id >>> 3) % this.nebTex.length)
+          if (this.nebMapId[nebN] !== ti2) {
+            sp2.material.map = this.nebTex[(b.id >>> 3) % this.nebTex.length]!
+            sp2.material.needsUpdate = true
+            this.nebMapId[nebN] = ti2
+          }
+          sp2.material.rotation = (b.id % 314) * 0.02 + 1.2
+          sp2.material.color.setRGB(0.8, 0.85, 0.95)
+          sp2.material.opacity = 0.55
+          sp2.position.set(ax, ay, az)
+          sp2.scale.setScalar(sc * 1.9)
           nebN++
         }
         if (glowN < MAX_GLOW) {
@@ -1235,6 +1258,10 @@ void main(){
     this.diskMat.uniforms['uTime']!.value = t
     this.diskMat.uniforms['uFeed']!.value = Math.min(1, g.feed + g.quasar * 0.7)
     this.diskMat.uniforms['uInner']!.value = Math.max(0.03, (BR / R) * 1.2)
+    // 호킹 색온도 T∝1/M — 질량이 클수록 검붉게 (조사 ②-8, 계수 1.23e23 정정판)
+    const hawkT = Math.max(0, Math.min(1, 1.1 - Math.log10(g.vol + 10) / 9))
+    this.diskMat.uniforms['uTemp']!.value = hawkT
+    this.lensPass.uniforms['uTemp']!.value = hawkT
     for (let i = 0; i < this.jets.length; i++) {
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1

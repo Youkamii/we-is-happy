@@ -60,8 +60,11 @@ function sys(
   extra?: { planets?: readonly MapPlanet[]; companions?: MapSystem['companions'] },
 ): MapSystem {
   const p = at(ly, angleDeg, name)
+  // 성운·은하는 은하 원반(얇은 층)에 있다 — 실물리이자 도달 가능성: z 를 심연에
+  // 두면 "가까이 오니 사라져"가 된다 (실플레이). 항성만 구형 분포 유지.
+  const z = kind === 'sun' ? p.z : Math.max(-42000, Math.min(42000, p.z))
   return {
-    name, log, ly, x: p.x, y: p.y, z: p.z, r, kind,
+    name, log, ly, x: p.x, y: p.y, z, r, kind,
     cr: color[0], cg: color[1], cb: color[2],
     planets: extra?.planets, companions: extra?.companions,
   }
@@ -180,6 +183,10 @@ export const HOLES: readonly { name: string; r: number; x: number; y: number; z:
   { ...at(4700, 150, 'V616 모노케로티스'), name: 'V616 모노케로티스', r: 100, log: '' },
   { ...at(7800, 63, 'V404 백조자리'), name: 'V404 백조자리', r: 140, log: '' },
   { ...at(11000, 265, 'GRO J1655-40'), name: 'GRO J1655-40', r: 130, log: '' },
+  // IMBH 관문 — 질량 사다리의 잃어버린 계단 (조사 ②-19): 성단 코어의 중간질량
+  { ...at(13000, 233, '47 큰부리새 IMBH'), name: '47 큰부리새 IMBH', r: 360, log: '' },
+  { ...at(15800, 232, '오메가 센타우리 IMBH'), name: '오메가 센타우리 IMBH', r: 480, log: '' },
+  { ...at(33600, 90, 'M15 IMBH'), name: 'M15 IMBH', r: 560, log: '' },
 ]
 
 /** 태양계 껍질 경계 (게임 px) — 실제 구조의 축소: 행성계 → 카이퍼 → 산란 원반 → 오르트 */
