@@ -120,7 +120,7 @@ describe('검은 입', () => {
 
     const g2 = new Voyage()
     g2.start(store)
-    expect(Math.round(g2.radius), '크기는 리셋된다 — 항해는 언제나 티끌에서').toBe(2)
+    expect(Math.round(g2.radius), '크기는 리셋된다 — 항해는 언제나 지구에서').toBe(16)
     expect(g2.journal.some((e) => e.name === eatenName), '명부는 이어진다').toBe(true)
     expect(g2.voyages, '항해 횟수가 센다').toBe(2)
     expect(g2.active.some((b) => b.id === prey.id), '우주는 아문다').toBe(true)
@@ -284,9 +284,9 @@ describe('검은 입', () => {
   it('⑬ 우주는 실재다 — 태양계·프록시마·궁수자리 A*', () => {
     const g = new Voyage()
     g.start(null)
-    const earth = g.active.find((b) => nameOf(b.id)?.name === '지구')
-    expect(earth, '지구가 있다').toBeTruthy()
-    expect(earth!.r, '지구는 첫날부터 못 삼킨다').toBeGreaterThan(g.radius * 0.8)
+    // 지구는 지도에 없다 — 내가 곧 지구다 (30초에 걸쳐 블랙홀로 붕괴)
+    expect(g.active.find((b) => nameOf(b.id)?.name === '지구'), '지구는 나다').toBeUndefined()
+    expect(Math.round(g.radius), '지구 질량으로 눈뜬다').toBe(16)
     expect(g.active.some((b) => nameOf(b.id)?.name === '태양'), '태양이 있다').toBe(true)
 
     // 프록시마 — 실제 가장 가까운 별. 지도의 그 자리에.
@@ -378,20 +378,21 @@ describe('검은 입', () => {
   it('⑰ 땅콩만 해도 갉는다 — 접촉 잠식 (블랙홀은 크기가 아니라 밀도다)', () => {
     const g = new Voyage()
     g.start(null)
-    const earth = g.active.find((b) => nameOf(b.id)?.name === '지구')!
-    const r0 = earth.r
+    const venus = g.active.find((b) => nameOf(b.id)?.name === '금성')!
+    g.vol = volFor(2) // 땅콩 — 지구 시작 질량을 내려놓고 잠식만 잰다
+    const r0 = venus.r
     const vol0 = g.vol
     const input = mockInput(0, 0)
     for (let s = 0; s < 120; s++) {
-      g.x = earth.x + (g.radius + earth.r) * 0.99
-      g.y = earth.y
-      g.z = earth.z
+      g.x = venus.x + (g.radius + venus.r) * 0.99
+      g.y = venus.y
+      g.z = venus.z
       g.vx = 0
       g.vy = 0
       g.vz = 0
       g.update(input, 1 / 60)
     }
-    expect(earth.r, '지구가 스멀스멀 깎인다').toBeLessThan(r0 - 0.03)
+    expect(venus.r, '금성이 스멀스멀 깎인다').toBeLessThan(r0 - 0.03)
     for (let s = 0; s < 120; s++) g.update(input, 1 / 60)
     // 소화는 질량 비례(5%/s) — 티끌의 2초 소화분은 몸의 ~10% 수준이면 정상
     expect(g.vol, '깎인 것은 스트림으로 내 것이 된다').toBeGreaterThan(vol0 + 3)

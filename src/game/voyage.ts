@@ -343,6 +343,8 @@ export class Voyage {
   preyDist = Infinity
   /** 성간 순항 배율 — 먹이도 천체도 없는 공허에서만 붙는다 (HUD 가 읽는다) */
   cruise = 1
+  /** 궤도 관성 권위 0..1 — 지배 재진입 시 스냅 대신 서서히 (교차 검증 수리) */
+  private domS = 0
   /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
   navAssist = false
   /** 클릭 지정 목적지 — 속도·제동·z 수렴이 전부 이 좌표 기준 (main 세팅) */
@@ -386,6 +388,12 @@ export class Voyage {
 
   get eatenThisRun(): number {
     return this.eatCount
+  }
+
+  /** 지구→블랙홀 붕괴 진행 0..1 — 시작 30초(중력 유예와 같은 시계).
+   *  렌더가 이 값으로 지구 껍질을 조여 그린다 ("붕괴 과정 보여주고": 사용자) */
+  get morph(): number {
+    return Math.min(1, this.runT / 30)
   }
 
   sfx(name: SfxName): void {
@@ -441,6 +449,7 @@ export class Voyage {
     this.jetCd = 0
     this.cometCd = 0
     this.cruise = 1
+    this.domS = 0
     this.runT = 0
     this.nearAny = Infinity
     this.mapNearS = 1e9
@@ -484,19 +493,24 @@ export class Voyage {
     this.eatCount = 0
     this.voyages += 1
     this.refreshSectors(true)
-    // 지구 곁에서 눈뜬다 — 타이틀의 약속이자 스케일의 증명: 티끌의 눈높이에서
-    // 첫 화면부터 행성이 거대해야 한다 ("왜 시작부터 토성만 해": 실플레이)
+    // 나는 지구다 — 지구 자리·지구 속도·지구 질량에서 30초에 걸쳐 블랙홀로
+    // 붕괴한다 ("컨셉을 지구로 시작하자. 30초에 걸쳐서": 사용자). 30초 중력
+    // 유예가 곧 붕괴 연출 시간이다 — 규칙과 서사가 같은 시계를 쓴다 (morph).
     const earth = this.active.find((b) => b.id === hashSeed('sol:지구'))
     if (earth) {
-      // 표면 곁 스폰 — 지구가 하늘의 절반을 덮는 거리 (몸의 ~6배)
-      this.x = earth.x + earth.r * 2.0
-      this.y = earth.y + earth.r * 0.8
+      this.x = earth.x
+      this.y = earth.y
       this.z = earth.z
-      // 궤도 스폰 — 지구와 같은 공전 속도로 눈뜬다 (달처럼 동행). 정지 스폰이면
-      // 태양으로 자유낙하해 첫 화면이 "빨려들어가서 못 움직임"이 된다 (실플레이).
+      // 궤도 그대로 — 지구의 공전 속도로 눈뜬다. 정지 스폰이면 태양으로
+      // 자유낙하해 첫 화면이 "빨려들어가서 못 움직임"이 된다 (실플레이).
       this.vx = earth.vx
       this.vy = earth.vy
       this.vz = earth.vz
+      this.vol = volFor(earth.r)
+      // 지도의 지구는 퇴장 — 내가 곧 지구다. 남겨두면 유령 쌍둥이가 된다.
+      this.eaten.add(earth.id)
+      const ei = this.active.indexOf(earth)
+      if (ei >= 0) this.active.splice(ei, 1)
       this.refreshSectors(true)
     }
     this.camera.x = this.x
@@ -1112,16 +1126,17 @@ export class Voyage {
     // "훅훅" 요동친다 (실플레이). 1.5/s 로 미끄러뜨린다.
     this.mapNearS += (mapNear - this.mapNearS) * (1 - Math.exp(-1.5 * step))
     mapNear = Math.min(mapNear, this.mapNearS)
-    // 클릭 목적지 — 제동·속도의 기준 거리: 지정 항로 중엔 중간 계들을 빠르게
-    // 통과하고(느슨한 mapNear·6), 브레이크는 목적지 거리로 잡는다
+    // 클릭 목적지 — 지정 항로는 명령이다: 제동은 **목적지 거리로만** 잡는다.
+    // 도중 별을 mapNear 로 보면 전방에 별 하나만 걸려도 순항이 꺼지고, 내가
+    // 끌고 다니는 수행단(포획 천체)이 nearAny 게이트를 영구히 눌러 배율이
+    // 1에 고정된다 (실플레이 "1광년에 몇십 초": 계측 ~1,250px/s = 광년당 40초).
     const navDist = this.navOn ? Math.hypot(this.navX - this.x, this.navY - this.y) : Infinity
-    const brakeD = this.navOn ? Math.min(navDist, mapNear * 6) : mapNear
-    // 게이트는 둘뿐: 의미 있는 천체(내 30%+)가 2.5화면 안에 있는가 + 지도 제동.
-    // preyDist(잔부스러기 폴백 포함)를 게이트에 넣으면 성간의 상수 밀도 잔챙이가
-    // 거대 R 의 문턱 안에 언제나 있어 순항이 죽는다 (계측 0~5%). 잔챙이·한입거리는
-    // 순항을 막을 자격이 없다 — 지나가며 입이 쓸어담는다.
-    const empty = this.nearAny > base * 2.5 && brakeD > spNow * 1.4 + base * 8
-    const ck = empty && this.thrusting ? 0.7 : 4.5
+    const brakeD = this.navOn ? navDist : mapNear
+    // 게이트: 지정 항로는 제동 거리만 본다. 수동 순항은 둘 — 의미 있는 천체
+    // (내 30%+)가 2.5화면 안에 있는가 + 지도 제동. preyDist(잔부스러기 폴백)를
+    // 게이트에 넣으면 성간의 상수 밀도 잔챙이가 순항을 죽인다 (계측 0~5%).
+    const empty = (this.navOn || this.nearAny > base * 2.5) && brakeD > spNow * 1.4 + base * 8
+    const ck = empty && this.thrusting ? (this.navOn ? 1.8 : 0.7) : 4.5
     this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
     // 순항 z 수렴 — 별들이 구형으로 흩어진 우주에서 수동 xy 비행만으로도
     // 목적지 층에 닿아야 한다: 순항 중엔 나침반 표적의 z 로 미끄러져 간다
@@ -1132,13 +1147,25 @@ export class Voyage {
       const tzN = this.navOn ? this.navZ : this.preyDist < 1e8 ? this.preyZ : this.z
       this.vz += (tzN - this.z) * Math.min(0.6, this.cruise * 0.09) * step
     }
-    // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
-    // 원거리 클릭 항법(50광년 초과) — **클릭 목적지 거리** 비례로 세게 연다.
-    // 나침반 거리(근처 먹이)를 보면 발동이 안 된다 ("카리나 왜 오래 걸려": 실플레이)
+    // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력.
+    // 지정 항로는 **무상한 로그 항행**: 목표 속도 ∝ 남은 거리(0.6/s) — 어느
+    // 거리든 e-감쇠 십수 번이면 도착한다(수백 광년 ≈ 15초). 광속 제한은 없다 —
+    // 상대성은 연출(조석·렌즈)의 것이지 이동의 족쇄가 아니다 ("빛의 속도를
+    // 못 넘으면 할 이유가 없다": 사용자). 나침반 자동 항법(먹이 사냥)만 종전
+    // 상한 유지 — 사냥은 근거리 정밀 기동이다.
     const targetD = this.navOn ? navDist : this.preyDist
-    const farNav = this.navAssist && targetD > 2500000
-      ? Math.min(3000000, targetD * 0.2)
-      : 0
+    // 지나침 가드 — 목적지 **반대 방향**으로 달리는 중엔 심공 보너스를 끊는다.
+    // 보너스가 남은 거리에 비례하므로, 지나친 뒤엔 멀어질수록 더 빨라지는
+    // 폭주 피드백이 된다 (계측: 조향 없는 하네스에서 1.5e18 px/s 발산).
+    const navAway = this.navOn &&
+      this.vx * (this.navX - this.x) + this.vy * (this.navY - this.y) < 0
+    const farNav = this.navOn
+      ? navAway
+        ? 0
+        : Math.max(0, (navDist - base * 8) * 0.6)
+      : this.navAssist && targetD > 2500000
+        ? Math.min(3000000, targetD * 0.2)
+        : 0
     const acc = thrustAcc(R) * this.cruise +
       (this.cruise > 3 ? Math.min(400000, mapNear * 0.06) + farNav * 0.5 : 0)
     if (this.thrusting) {
@@ -1339,6 +1366,24 @@ export class Voyage {
                 b.vy = this.vy + uy * rad2 + tty * scl
               }
             }
+            // 관통 방지 — 명시적 오일러에서 안쪽 반경 속도가 한 프레임에 d 를
+            // 넘으면 천체가 내 중심 **반대편으로 순간이동**한다 (교차 검증
+            // CONFIRMED: 과부하 시 d=100 → 반대편 ~3,450 사출. "줄었다 늘었다"
+            // 의 반경 쪽 형제 버그). 한 프레임 낙하량을 d 의 85% 로 묶는다 —
+            // 다음 프레임 접촉 삼킴으로 끝난다. 접선은 손대지 않는다.
+            {
+              const rvx3 = b.vx - this.vx
+              const rvy3 = b.vy - this.vy
+              const rvz3 = b.vz - this.vz
+              const vin = rvx3 * ux + rvy3 * uy + rvz3 * uz
+              const vinMax = (d * 0.85) / Math.max(step, 1e-4)
+              if (vin > vinMax) {
+                const cut = vin - vinMax
+                b.vx -= ux * cut
+                b.vy -= uy * cut
+                b.vz -= uz * cut
+              }
+            }
           }
         }
       }
@@ -1387,7 +1432,13 @@ export class Voyage {
     // 궤도 관성 — 입력이 없으면 지배 천체의 케플러 흐름에 실린다. 우주의 기본
     // 상태는 정지가 아니라 궤도다: 정지+상시 중력=낙하는 필연이라, 이게 없으면
     // 방치가 곧 태양 추락이 된다 (계약 ㉑ 실측). 추진하는 순간 자유다.
-    if (!this.thrusting && domB && domG > 0.5) {
+    // 재진입 평활(domS) — 과부하 토글로 지배가 사라졌다 돌아오는 순간 즉시
+    // 45%/프레임 스냅을 걸면, 줄어든 d 로 재계산된 원궤도 속도 + 바깥 바이어스가
+    // 속도 스파이크로 꽂힌다 (교차 검증 CONFIRMED: "토글하면 멀어져"의 잔여
+    // 경로). 권위는 ~0.7초에 걸쳐 0→1 로 차오른다.
+    const domOn = !this.thrusting && domB !== null && domG > 0.5
+    this.domS += ((domOn ? 1 : 0) - this.domS) * (1 - Math.exp(-3 * step))
+    if (domOn && domB) {
       const dx = domB.x - this.x
       const dy = domB.y - this.y
       const d = Math.hypot(dx, dy) || 1
@@ -1399,7 +1450,7 @@ export class Voyage {
       const vCirc = Math.sqrt(domG * d)
       // 보정 12/s + 정상상태 내향 오차(g/12)만큼의 바깥 바이어스 — 느슨한 보정은
       // 중력 래칫으로 나선낙하가 된다 (계측: 0.5/s 에서 내향 42px/s)
-      const k = 1 - Math.exp(-12 * step)
+      const k = (1 - Math.exp(-12 * step)) * this.domS
       const bias = domG / 12
       this.vx += (domB.vx + tx * sign * vCirc - (dx / d) * bias - this.vx) * k
       this.vy += (domB.vy + ty * sign * vCirc - (dy / d) * bias - this.vy) * k
@@ -1609,6 +1660,10 @@ export class Voyage {
       }
     }
     if (toShred) for (const b of toShred) this.shred(b)
+
+    // ── 천체끼리의 충돌 — 서로에게도 물리가 있다 ("왜 부딪혀도 아무 일도
+    // 안 일어나": 실플레이). 내가 끌어모은 무대 위에서만 검사한다.
+    this.collideBodies(base)
 
     // ── 포식 — 동시 슬롯 8. 이동 선분 스윕 + 상대속도 팽창 (터널링 방지).
     for (let i = this.absorbs.length - 1; i >= 0; i--) {
@@ -2193,6 +2248,66 @@ export class Voyage {
       this.persistSoon()
     } else {
       this.dirty = true
+    }
+  }
+
+  /**
+   * 천체 충돌 — 겹치면 큰 쪽이 작은 쪽을 삼킨다 (질량·운동량 보존, 15%는
+   * 섬광 가스로 이탈). 검사는 내 주변 무대(base·40)의 후보 120개만 — 전 우주
+   * n² 은 비용이 안 나오고, 충돌은 어차피 내가 끌어모은 곳에서 난다.
+   * 파편(origin)·불씨(decay)가 작은 쪽이면 통과 — 파편 성찬과 불씨 보상은
+   * 플레이어의 몫이다 (이전 판정 "파편 증발" 재발 방지).
+   */
+  private collideBodies(base: number): void {
+    const lim = base * 40
+    const cand: Body[] = []
+    for (const b of this.active) {
+      if (this.eaten.has(b.id) || b.r < 0.6) continue
+      const dx = b.x - this.x
+      const dy = b.y - this.y
+      if (dx * dx + dy * dy > lim * lim) continue
+      cand.push(b)
+      if (cand.length >= 120) break
+    }
+    for (let i = 0; i < cand.length; i++) {
+      const a = cand[i]!
+      if (this.eaten.has(a.id)) continue
+      for (let j = i + 1; j < cand.length; j++) {
+        const c = cand[j]!
+        if (this.eaten.has(c.id)) continue
+        const dx = c.x - a.x
+        const dy = c.y - a.y
+        const rr = (a.r + c.r) * 0.72
+        if (dx * dx + dy * dy > rr * rr) continue
+        if (Math.abs(c.z - a.z) > rr * 1.5) continue
+        const big = a.r >= c.r ? a : c
+        const small = big === a ? c : a
+        if (big.r < 1.2 || small.origin !== undefined || small.decay !== undefined) continue
+        const m1 = big.r * big.r * big.r
+        const m2 = small.r * small.r * small.r
+        const f = m2 / (m1 + m2)
+        big.vx += (small.vx - big.vx) * f
+        big.vy += (small.vy - big.vy) * f
+        big.vz += (small.vz - big.vz) * f
+        big.r = Math.cbrt(m1 + m2 * 0.85)
+        big.r0 = Math.max(big.r0, big.r)
+        this.eaten.add(small.id)
+        const si = this.active.indexOf(small)
+        if (si >= 0) this.active.splice(si, 1)
+        // 충돌 섬광 — 접점에서 작은 쪽의 색으로 터진다
+        const cx = (a.x + c.x) * 0.5
+        const cy = (a.y + c.y) * 0.5
+        const cz = (a.z + c.z) * 0.5
+        for (let gI = 0; gI < 6; gI++) {
+          const ga = (gI / 6) * Math.PI * 2
+          const sp = 80 + small.r * 6
+          this.spawnGas(cx, cy, cz,
+            Math.cos(ga) * sp + big.vx, Math.sin(ga) * sp + big.vy,
+            ((gI % 3) - 1) * sp * 0.3,
+            small.r * 0.5, Math.min(1.3, small.cr * 1.3), small.cg, small.cb * 0.8, 1.2)
+        }
+        if (this.eaten.has(a.id)) break
+      }
     }
   }
 

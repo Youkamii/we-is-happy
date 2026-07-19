@@ -377,6 +377,8 @@ export class Scene3D {
   private readonly gasSprites: THREE.Sprite[] = []
   private readonly marks: THREE.Sprite[] = []
   private readonly playerMesh: THREE.Mesh
+  /** 붕괴하는 지구 — 시작 30초, 내 자리에서 지구 껍질이 조여들며 검어진다 */
+  private readonly earthMorphMesh: THREE.Mesh
   private readonly mergeMesh: THREE.Mesh
   private readonly mergeGlow: THREE.Sprite
   private readonly waves: THREE.Mesh[] = []
@@ -546,6 +548,13 @@ export class Scene3D {
     // 나 — 빛의 부재. 구체는 검고, 지평선·광자 고리는 렌즈 셰이더가 마무리한다
     this.playerMesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color: 0x000000 }))
     this.scene.add(this.playerMesh)
+    // 붕괴하는 지구 — 암석 텍스처에 바다색 틴트. morph 가 1이 되면 퇴장한다
+    {
+      const em = new THREE.MeshLambertMaterial({ color: 0x86b2e8, emissive: 0x0c1626 })
+      em.map = this.planetTex[4] ?? null
+      this.earthMorphMesh = new THREE.Mesh(sphere, em)
+      this.scene.add(this.earthMorphMesh)
+    }
     // 나선낙하 중인 상대 — 검은 구 + 백열 테
     this.mergeMesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color: 0x000000 }))
     this.mergeMesh.visible = false
@@ -1410,6 +1419,21 @@ void main(){
     // 실물리 그대로: M87 제트는 지평선의 수만 배다.
     this.playerMesh.position.set(px, py, pz)
     this.playerMesh.scale.setScalar(BR)
+    // 지구→블랙홀 붕괴 — 30초 동안 지구 껍질이 조여들며 빛을 잃는다
+    {
+      const morph = g.morph
+      if (morph < 1) {
+        this.earthMorphMesh.visible = true
+        this.earthMorphMesh.position.set(px, py, pz)
+        this.earthMorphMesh.scale.setScalar(Math.max(BR, R * (1 - morph * 0.94)))
+        this.earthMorphMesh.rotation.y = t * 0.2
+        const dim = Math.max(0.06, 1 - morph * 1.05)
+        const em = this.earthMorphMesh.material as THREE.MeshLambertMaterial
+        em.color.setRGB(0.53 * dim, 0.7 * dim, 0.92 * dim)
+      } else {
+        this.earthMorphMesh.visible = false
+      }
+    }
     this.disk.position.set(px, py, pz)
     // 원반도 몸 눈금 — 영향권(R) 눈금이면 티끌 곁에서 화면을 덮는다
     this.disk.scale.setScalar(Math.min(R, BR * 3))
