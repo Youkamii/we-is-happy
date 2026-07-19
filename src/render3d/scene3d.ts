@@ -642,7 +642,9 @@ void main(){
     this.camera.far = dist * 60
     this.camera.near = Math.max(0.5, dist * 0.002)
     this.camera.updateProjectionMatrix()
-    if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.5 / (dist * 18)
+    // 우주에 안개는 없다 — 0.5 는 원거리를 뭉개서 "좀만 멀어지면 아무것도
+    // 안 보이는" 원흉이었다 (실플레이). 깊이 단서만 남을 만큼 희미하게.
+    if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.1 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
     this.band.position.copy(this.camera.position)

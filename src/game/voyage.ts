@@ -905,8 +905,10 @@ export class Voyage {
   /** 활성 반경(섹터) — 시야가 커지면 세계도 넓게 깬다. 이게 없으면 거대해질수록
    * 화면이 로드 범위 밖 = 빈 배경만 보인다 (실플레이 판정). */
   private rangeN(): number {
-    // 3D 원근은 지평선까지 보인다 — 2D 시절(1.15)보다 넓게 깨워야 시야가 안 빈다
-    return Math.min(7, Math.max(1, Math.ceil((this.camera.viewHeight * 1.5) / SECTOR)))
+    // 3D 원근은 지평선까지 보인다 — 캡 12(약 29k px): 7(17k)은 "좀만 멀어지면
+    // 아무것도 안 보이는" 시야 절벽이었다 (실플레이). 성간 섹터 생성은 저렴함이
+    // 계측돼 있다 (적대 리뷰).
+    return Math.min(12, Math.max(1, Math.ceil((this.camera.viewHeight * 1.5) / SECTOR)))
   }
 
   private refreshSectors(force = false): void {
