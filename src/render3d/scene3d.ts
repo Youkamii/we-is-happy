@@ -138,6 +138,59 @@ function smokeTexture(): THREE.Texture {
   return new THREE.CanvasTexture(c)
 }
 
+/**
+ * 행성 표면 — 절차 생성 (외부 에셋은 단일 파일 원칙상 불가, 대신 굽는다).
+ * 회색조로 만들어 몸색 틴트가 곱해지게 — 8장으로 수백 행성이 다 달라 보인다.
+ */
+function planetTexture(seed: number, banded: boolean): THREE.Texture {
+  const c = document.createElement('canvas')
+  c.width = 128
+  c.height = 64
+  const ctx = c.getContext('2d')!
+  let s = seed
+  const rnd = (): number => {
+    s = (s * 16807) % 2147483647
+    return s / 2147483647
+  }
+  if (banded) {
+    // 목성형 — 위도 줄무늬 + 난류 얼룩
+    const p1 = rnd() * 6.28
+    const p2 = rnd() * 6.28
+    for (let y = 0; y < 64; y++) {
+      const l = 150 + 52 * Math.sin(y * 0.33 + p1) + 26 * Math.sin(y * 0.9 + p2)
+      ctx.fillStyle = `rgb(${l | 0},${l | 0},${l | 0})`
+      ctx.fillRect(0, y, 128, 1)
+    }
+    for (let i = 0; i < 34; i++) {
+      const y = rnd() * 64
+      const dark = rnd() < 0.5
+      ctx.fillStyle = dark ? 'rgba(40,40,40,0.25)' : 'rgba(255,255,255,0.2)'
+      ctx.beginPath()
+      ctx.ellipse(rnd() * 128, y, 5 + rnd() * 16, 1.2 + rnd() * 2.4, 0, 0, 6.28)
+      ctx.fill()
+    }
+  } else {
+    // 암석형 — 반점 지형 + 극관
+    ctx.fillStyle = '#969696'
+    ctx.fillRect(0, 0, 128, 64)
+    for (let i = 0; i < 150; i++) {
+      const dark = rnd() < 0.55
+      ctx.fillStyle = dark ? `rgba(30,30,30,${0.1 + rnd() * 0.2})` : `rgba(255,255,255,${0.08 + rnd() * 0.16})`
+      ctx.beginPath()
+      ctx.ellipse(rnd() * 128, rnd() * 64, 2 + rnd() * 9, 2 + rnd() * 7, rnd() * 3, 0, 6.28)
+      ctx.fill()
+    }
+    if (rnd() < 0.7) {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'
+      ctx.fillRect(0, 0, 128, 3 + rnd() * 4)
+      ctx.fillRect(0, 64 - (3 + rnd() * 4), 128, 8)
+    }
+  }
+  const t = new THREE.CanvasTexture(c)
+  t.wrapS = THREE.RepeatWrapping
+  return t
+}
+
 function ringTexture(): THREE.Texture {
   // 행성 고리 — 방사형 밴드 + 카시니 간극 두 줄 (미마스 공명이 비운 자리)
   const c = document.createElement('canvas')
@@ -197,6 +250,10 @@ export class Scene3D {
   private readonly nebSprites: THREE.Sprite[] = []
   private readonly pulsarBeams: THREE.Mesh[] = []
   private readonly band: THREE.Points
+  /** 근접 행성 글로브 풀 — 인스턴싱은 텍스처를 못 입는다 */
+  private readonly planetMeshes: THREE.Mesh[] = []
+  private readonly planetTex: THREE.Texture[] = []
+  private readonly planetTexId: number[] = []
 
   private readonly ecliptic: THREE.PolarGridHelper
   /** 랜드마크 — 실지도 항성계는 아무리 멀어도 밝은 별점으로 보인다 (항법의 잣대) */
@@ -244,6 +301,20 @@ export class Scene3D {
     this.haloMesh = new THREE.InstancedMesh(sphere, new THREE.MeshBasicMaterial(), 400)
     this.haloMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
     this.scene.add(this.haloMesh)
+    // 근접 행성 글로브 — 절차 표면(줄무늬 4장·암석 4장)을 입은 전용 구체 10개.
+    // 태양계 밖 행성이 민짜 회색 공("희무끄레")이던 원인의 수리.
+    for (let i = 0; i < 4; i++) this.planetTex.push(planetTexture(101 + i * 37, true))
+    for (let i = 0; i < 4; i++) this.planetTex.push(planetTexture(211 + i * 53, false))
+    for (let i = 0; i < 10; i++) {
+      const mat = new THREE.MeshLambertMaterial()
+      mat.emissive = new THREE.Color(0x161412)
+      const pm = new THREE.Mesh(sphere, mat)
+      pm.visible = false
+      this.planetMeshes.push(pm)
+      this.planetTexId.push(-1)
+      this.scene.add(pm)
+    }
+
     // 행성 고리 풀 — 토성이 드디어 고리를 되찾는다
     const ringGeo = new THREE.RingGeometry(1.3, 2.5, 56)
     const ringTex = ringTexture()
@@ -627,6 +698,7 @@ void main(){
     let markN = 0
     let ringN = 0
     let nebN = 0
+    let planetN = 0
     let pulsarSeen = false
     let pulsarX = 0
     let pulsarY = 0
@@ -680,8 +752,9 @@ void main(){
       // 행성은 구체, **카이퍼·오르트 얼음도 티끌 반짝임**으로는 보인다 ("카이퍼
       // 벨트도 없어": 실플레이 — 있는데 서브픽셀이라 안 보였다). 다가가면
       // 실크기가 자연히 이긴다 (원근 거짓말은 낮은 θ 로 억제).
+      let dCam = 0
       if (redK === 0) {
-        const dCam = Math.hypot(
+        dCam = Math.hypot(
           ax - this.camera.position.x, ay - this.camera.position.y, az - this.camera.position.z,
         )
         const theta = b.r >= R * 1.25
@@ -792,17 +865,42 @@ void main(){
           core.material.color.setRGB(1.4, 1.3, 1.1)
           core.material.opacity = 0.6
         }
-      } else if (litN < MAX_INST) {
-        this.lit.setMatrixAt(litN, this.m4)
-        this.col.setRGB(
-          Math.min(1, b.cr * (1 + redK * 0.8)),
-          Math.min(1, b.cg * (1 - redK * 0.7)),
-          Math.min(1, b.cb * (1 - redK * 0.9)),
-        )
-        this.lit.setColorAt(litN, this.col)
-        litN++
-        // 행성 대기 림 — 대기 조성이 곧 색이다 (지구 청색, 금성 황백, 천왕성 청록…)
-        const rim = ATMOS.get(b.id)
+      } else {
+        // 근접 행성 글로브 — 어디의 행성이든(태양계·센타우리·필드계) 눈에 띄는
+        // 10개는 절차 표면을 입고 자전한다. 나머지는 인스턴스 구체.
+        const globe = (b.kind === BodyKind.Rock || b.kind === BodyKind.Ringed) &&
+          redK === 0 && planetN < 10 && dCam > 0 && sc > dCam * 0.012
+        if (globe) {
+          const pm = this.planetMeshes[planetN]!
+          pm.visible = true
+          pm.position.set(ax, ay, az)
+          pm.scale.setScalar(Math.max(0.6, sc))
+          pm.rotation.y = t * 0.05 + (b.id % 628) * 0.01
+          const mat = pm.material as THREE.MeshLambertMaterial
+          const ti = b.id % 8
+          if (this.planetTexId[planetN] !== ti) {
+            mat.map = this.planetTex[ti]!
+            mat.needsUpdate = true
+            this.planetTexId[planetN] = ti
+          }
+          const dimZ2 = 0.75 + 0.25 * Math.min(1, sc / Math.max(1, b.r))
+          mat.color.setRGB(
+            Math.min(1, b.cr * 1.15 * dimZ2), Math.min(1, b.cg * 1.15 * dimZ2), Math.min(1, b.cb * 1.2 * dimZ2),
+          )
+          planetN++
+        } else if (litN < MAX_INST) {
+          this.lit.setMatrixAt(litN, this.m4)
+          this.col.setRGB(
+            Math.min(1, b.cr * (1 + redK * 0.8)),
+            Math.min(1, b.cg * (1 - redK * 0.7)),
+            Math.min(1, b.cb * (1 - redK * 0.9)),
+          )
+          this.lit.setColorAt(litN, this.col)
+          litN++
+        }
+        // 행성 대기 림 — 대기 조성이 곧 색이다. 태양계 밖 행성도 은은한 대기를 두른다
+        const rim = ATMOS.get(b.id) ??
+          (globe && b.r >= 6 ? ([b.cr * 0.5, b.cg * 0.55, b.cb * 0.85] as const) : undefined)
         if (rim && glowN < MAX_GLOW - 1) {
           const sp = this.glows[glowN++]!
           sp.visible = true
@@ -861,6 +959,7 @@ void main(){
     for (let i = markN; i < MAX_MARK; i++) this.marks[i]!.visible = false
     for (let i = ringN; i < this.rings.length; i++) this.rings[i]!.visible = false
     for (let i = nebN; i < MAX_NEB; i++) this.nebSprites[i]!.visible = false
+    for (let i = planetN; i < this.planetMeshes.length; i++) this.planetMeshes[i]!.visible = false
 
     // 게 펄서 — 등대 빔 두 줄기가 자기축을 따라 쓸고 돈다 (게 성운의 심장)
     if (pulsarSeen) {
