@@ -32,6 +32,17 @@ function boot(): void {
   game.start(store)
 
   // 소리 없음 — 오디오는 구 게임의 유물이었고 판정으로 전부 제거됐다 (2026-07-18)
+  // 질량 과부하 — H 를 누르는 동안 유효 질량 ×1000 (중력·지배·흡수 전부)
+  let surgeHeld = false
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'h' || e.key === 'H' || e.key === 'ㅗ') surgeHeld = true
+  })
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'h' || e.key === 'H' || e.key === 'ㅗ') surgeHeld = false
+  })
+  window.addEventListener('blur', () => {
+    surgeHeld = false
+  })
   // 배치 저장의 마지막 조각 — 탭을 닫아도 마지막 한 입은 명부에 남는다
   window.addEventListener('pagehide', () => game.flush())
   document.addEventListener('visibilitychange', () => {
@@ -130,7 +141,7 @@ function boot(): void {
     line('카이퍼 벨트와 오르트 구름을 지나면, 빈 우주에선 성간 순항이 붙는다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
     line('나침반이 언제나 다음 별을 가리킨다 — 은하수는 넓고, 끝은 안드로메다 너머다', 'font-size:13px;color:#6f8299;line-height:2')
     line('이동 WASD · 상승 스페이스 · 하강 시프트', 'font-size:13px;color:#ffd9a8;line-height:2')
-    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · N 자동 항법(먹으며 항로 추적)', 'font-size:13px;color:#6f8299;line-height:2')
+    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · N 자동 항법 · H(홀드) 질량 과부하', 'font-size:13px;color:#6f8299;line-height:2')
     line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 티끌에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
@@ -225,6 +236,7 @@ function boot(): void {
 
     if (!journalOpen) {
       game.navAssist = autoNav
+      game.surge = surgeHeld
       if (autoNav && (navPick || game.preyDist < Infinity)) autoSteer()
       else steer()
       game.update(wrapped, dt)
@@ -304,7 +316,7 @@ function boot(): void {
         : `달 ×${Math.max(1, Math.round(totalVol / 15.6))}`) +
       (game.digesting > totalVol * 0.05 ? ' (소화 중)' : '')
     coords.textContent =
-      `${game.region || '태양계'}  ·  질량 ${mass}\n` +
+      `${game.region || '태양계'}  ·  질량 ${mass}${surgeHeld ? '  ·  과부하 ×1000' : ''}\n` +
       `(${Math.round(game.x)}, ${Math.round(game.y)}, z${Math.round(game.z)})  ·  ` +
       `이번 항해 ${game.eatenThisRun} · 명부 ${game.journal.length}` +
       `${game.halo.length > 0 ? ` · 나의 은하 ${game.halo.length}성` : ''}` +

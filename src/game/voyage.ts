@@ -343,6 +343,8 @@ export class Voyage {
   cruise = 1
   /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
   navAssist = false
+  /** 질량 과부하 (H 홀드) — 유효 질량 ×1000 (main 이 매 프레임 세팅) */
+  surge = false
   private refreshCd = 0
   private nearAny = Infinity
   /** 다음 항로 — 근처에 먹을 게 없으면 나침반이 별 지도의 목적지를 가리킨다 */
@@ -1023,6 +1025,10 @@ export class Voyage {
     this.visualTime += dt
     if (!Number.isFinite(this.vol) || this.vol < 1) this.vol = START_VOL
     const R = this.radius
+    // 질량 과부하 (H 홀드) — 판정용 유효 질량 ×1000: 중력 서열·지배·흡수가
+    // 전부 이 값 기준으로 돈다. 몸(vol)·기록은 불변 — 떼면 원래대로.
+    const volE = this.surge ? this.vol * 1000 : this.vol
+    const surgeK = this.surge ? 26 : 1
     // 줌 눈금 — 거대해질수록 R×26 → R×18 로 수렴: 무한 줌아웃이면 주변이 전부
     // 동전이 된다 (실플레이). 내 존재감과 이웃의 크기가 같이 자란다.
     // 바닥 40: 티끌의 눈높이. 130에서도 시작 카메라가 몸의 56배 거리라 지구가
@@ -1161,7 +1167,7 @@ export class Voyage {
       // 거꾸로다: 태양 84개 질량이 지름 큰 별한테 무시당했다 ("큰 것들은
       // 오지도 않아": 실플레이). 내가 무거워지는 순간 태양도 나에게 떨어진다.
       // **사거리 컷 없음**: 중력은 모든 공간에 미친다. 1/r² 이 자연 감쇠다.
-      if (b.r * b.r * b.r < this.vol) {
+      if (b.r * b.r * b.r < volE) {
         const dx = this.x - b.x
         const dy = this.y - b.y
         const dz = this.z - b.z
@@ -1173,8 +1179,8 @@ export class Voyage {
           // 거리의 행성이 더 세게 뜯겨 오고, 태양을 삼킨 몸 곁에선 온 행성계가
           // 레일을 이탈해 낙하한다. 상한도 크게 열려야 "빨아들이는 위력"이
           // 질량과 함께 어마어마해진다 (실플레이 — R300 에서 고작 2배였다).
-          const heavy = 1 + R / 60
-          const capMe = PULL_CAP_BY_ME * (1 + R / 80)
+          const heavy = (1 + R / 60) * surgeK
+          const capMe = PULL_CAP_BY_ME * (1 + R / 80) * surgeK
           let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
           // 동역학 마찰 항적 (조사 ㉒, Chandrasekhar): 내가 지나간 뒤편의 것들이
           // 항적 밀도에 끌려 뒤늦게 따라 떨어진다 — 후방 보정 (경량판)
@@ -1279,7 +1285,7 @@ export class Voyage {
     let domB: Body | null = null
     for (const b of this.active) {
       // 나를 끄는 것도 질량 기준 — 내가 더 무거우면 저쪽이 내 밥이다
-      if (b.r * b.r * b.r <= this.vol || this.eaten.has(b.id)) continue
+      if (b.r * b.r * b.r <= volE || this.eaten.has(b.id)) continue
       const dx = b.x - this.x
       const dy = b.y - this.y
       const dz = b.z - this.z
@@ -1376,10 +1382,11 @@ export class Voyage {
       // "게이미피케이션한 부분은 있어야"), 7~10%는 복리 폭주로 봇이 2분 R25~30
       // (계측: 5%→11.8 / 6%→20.7 / 7%→25.1 / 10%→29.7 — 먹이 사다리 연쇄로
       // 초민감한 다이얼이다. 만질 땐 반드시 봇 재실측).
-      // 소화 = 7.5%/s × 스핀 효율 (5.7→42% 의 게임 눈금: 0.85+0.5a — 조사 ②-23)
+      // 소화 = 7.5%/s × 스핀 효율 (5.7→42% 의 게임 눈금: 0.85+0.5a — 조사 ②-23).
+      // 과부하 중엔 유효 질량 기준 — 흡수도 1000배 위력 (실플레이 H 키)
       const take = Math.min(
         this.streamIn * (1 - Math.exp(-2.2 * step)),
-        this.vol * 0.075 * (0.85 + 0.5 * this.spin) * step,
+        volE * 0.075 * (0.85 + 0.5 * this.spin) * step,
       )
       this.vol += take
       this.streamIn -= take
@@ -1409,7 +1416,7 @@ export class Voyage {
         // 아니다: 별이 통째로 조석 붕괴해 낙하한다. "토성만한 블랙홀(≈태양 수천
         // 배 질량)이면 태양이고 카이퍼고 찰나"(실플레이)가 이 항이다. 첫 태양
         // 공성전(내가 가벼울 때 dom=1)은 그대로 남는다 — 성장의 서사는 불변.
-        let dom = Math.max(1, this.vol / (2 * b.r * b.r * b.r))
+        let dom = Math.max(1, volE / (2 * b.r * b.r * b.r))
         // 최종 파섹 (조사 ㉕, 경량판): 은하심급(Core 거인)은 내 은하가 탄약이다 —
         // 거느린 별들이 손실원뿔로 각운동량을 빼앗아 병합을 하드닝한다
         if (b.kind === BodyKind.Core && b.r > 2000) {
@@ -1849,7 +1856,7 @@ export class Voyage {
       if (b.r >= R * EDIBLE) {
         // 공성 대상 — 통째론 못 삼켜도 질량이 내 밑이면 내 먹이다: 나침반이
         // 잡아야 한다 ("보이지도 않아서 먹지도 못하네": 실플레이)
-        if (b.r * b.r * b.r < this.vol * 0.8 && d - b.r < siegeDist) {
+        if (b.r * b.r * b.r < volE * 0.8 && d - b.r < siegeDist) {
           siegeDist = d - b.r
           sgX = b.x
           sgY = b.y
@@ -1912,7 +1919,7 @@ export class Voyage {
         // 체급 인식 — 내 질량의 8배가 넘는 앵커는 아직 내 항로가 아니다:
         // 어쩌지도 못할 별에 데려다 처박는 항법은 항법이 아니다 (실플레이).
         // 커질수록 베텔게우스·궁수자리 A* 가 차례로 항로에 열린다.
-        if (s.r * s.r * s.r > this.vol * 8) continue
+        if (s.r * s.r * s.r > volE * 8) continue
         const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z)
         if (d < best) {
           best = d
