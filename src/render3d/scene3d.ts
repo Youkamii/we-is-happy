@@ -363,6 +363,9 @@ export class Scene3D {
   private readonly landmarks: THREE.Sprite[] = []
   private readonly labelBox: HTMLDivElement
   private readonly labels: HTMLDivElement[] = []
+  private readonly labelSysIdx: number[] = []
+  /** 클릭된 목적지 — main 이 소비하고 비운다 */
+  pick: { x: number; y: number; z: number; name: string } | null = null
   /** 축 표시기 — three(X,Y,Z)=(빨,초,파) = 게임 (x, z↑, y). X 키 토글 */
   readonly axes: THREE.AxesHelper
   private readonly m4 = new THREE.Matrix4()
@@ -678,8 +681,16 @@ void main(){
       const d = document.createElement('div')
       d.style.cssText =
         'position:absolute;font:600 11px/1.4 ui-monospace,monospace;color:#c9a35f;' +
-        'text-shadow:0 0 6px rgba(0,0,0,.9);white-space:nowrap;display:none;'
+        'text-shadow:0 0 6px rgba(0,0,0,.9);white-space:nowrap;display:none;' +
+        'pointer-events:auto;cursor:pointer;'
+      // 목적지 클릭 항법 — 이름을 누르면 그리로 간다 (실플레이)
+      d.addEventListener('pointerdown', (e) => {
+        e.stopPropagation()
+        const si = this.labelSysIdx[i]!
+        if (si >= 0) this.pick = STAR_MAP[si]!
+      })
       this.labels.push(d)
+      this.labelSysIdx.push(-1)
       this.labelBox.appendChild(d)
     }
 
@@ -759,8 +770,10 @@ void main(){
       pz + Math.cos(this.yaw) * cp * dist,
     )
     this.camera.lookAt(px, py, pz)
-    this.camera.far = dist * 60
-    this.camera.near = Math.max(0.5, dist * 0.002)
+    // far 바닥 15만 — dist 비례만 두면 티끌 눈금(dist~26)에서 1,500px 밖이
+    // 통째로 잘린다 ("멀다고 렌더링 개 병신": 실플레이)
+    this.camera.far = Math.max(150000, dist * 60)
+    this.camera.near = Math.max(0.6, dist * 0.004)
     this.camera.updateProjectionMatrix()
     // 우주에 안개는 없다 — 0.5 는 원거리를 뭉개서 "좀만 멀어지면 아무것도
     // 안 보이는" 원흉이었다 (실플레이). 깊이 단서만 남을 만큼 희미하게.
@@ -790,19 +803,26 @@ void main(){
       const dy = sys.z - py
       const dz = sys.y - pz
       const d3 = Math.hypot(dx, dy, dz) || 1
-      if (d3 < dist * 12) {
-        sp.visible = false // 실제 지오메트리가 보이는 거리 — 별점은 물러난다
-        continue
+      const near12 = d3 < dist * 12
+      if (near12) {
+        sp.visible = false // 실제 지오메트리가 보이는 거리 — 별점만 물러난다
+      } else {
+        sp.visible = true
+        sp.position.set(px + (dx / d3) * skyR, py + (dy / d3) * skyR, pz + (dz / d3) * skyR)
+        const imp = sys.kind === 'core' ? 6 : sys.kind === 'garden' ? 4 : 1
+        sp.scale.setScalar(skyR * 0.01 * imp)
+        sp.material.opacity = sys.kind === 'sun' ? 0.6 : 0.38
       }
-      sp.visible = true
-      sp.position.set(px + (dx / d3) * skyR, py + (dy / d3) * skyR, pz + (dz / d3) * skyR)
-      const imp = sys.kind === 'core' ? 6 : sys.kind === 'garden' ? 4 : 1
-      sp.scale.setScalar(skyR * 0.01 * imp)
-      sp.material.opacity = sys.kind === 'sun' ? 0.6 : 0.38
-      // 라벨 — 화면 안에 있고 가까운 순 다섯. 겹치면 아래로 밀어낸다 (실플레이)
+      // 라벨은 도착 직전(2화면)까지 실제 위치에 붙어 남는다 — 별점이 꺼진 뒤
+      // 표식까지 잃으면 "가까워지면 대상을 못 찾는다" (실플레이)
+      if (near12 && d3 < dist * 2) continue
+      // 라벨 — 화면 안에 있고 가까운 순 다섯. 겹치면 아래로 밀어낸다 (실플레이).
+      // 근접(별점 꺼짐) 시엔 실제 좌표로 투영 — 1광년 안에서 표식을 잃지 않는다
       if (labelN < 5) {
-        this.v3.copy(sp.position).project(this.camera)
+        if (near12) this.v3.set(sys.x, sys.z, sys.y).project(this.camera)
+        else this.v3.copy(sp.position).project(this.camera)
         if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
+          this.labelSysIdx[labelN] = i
           const lb = this.labels[labelN++]!
           lb.style.display = 'block'
           const lx = ((this.v3.x + 1) / 2) * w0 + 8
@@ -820,7 +840,10 @@ void main(){
         }
       }
     }
-    for (let i = labelN; i < 5; i++) this.labels[i]!.style.display = 'none'
+    for (let i = labelN; i < 5; i++) {
+      this.labels[i]!.style.display = 'none'
+      this.labelSysIdx[i] = -1
+    }
 
     // 조명 — 가장 가까운 태양이 태양이다
     let sunB: { x: number; y: number; z: number } | null = null

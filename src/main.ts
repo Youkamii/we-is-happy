@@ -145,14 +145,17 @@ function boot(): void {
   // 자동 항법 — 나침반이 가리키는 것(먹이 우선, 없으면 다음 항로)을 추적하며
   // 먹고 이동한다. 수동 입력이 오면 즉시 해제 ("주변거 잡아먹으면서 목적지로").
   let autoNav = false
+  /** 라벨 클릭 목적지 — 도착(3화면)하면 해제되고 일반 항법으로 넘어간다 */
+  let navPick: { x: number; y: number; z: number; name: string } | null = null
   const autoSteer = (): void => {
     const w = wrapped as unknown as { move: { x: number; y: number }; lift: number }
-    // 근처(두 화면)에 먹이가 없으면 잡동사니 무시하고 항로 직행 ("자동항법 느림")
     const vh = game.camera.viewHeight
-    const useRoute = game.routeName !== null && game.preyDist > vh * 2.2
-    const tx = useRoute ? game.routeX : game.preyX
-    const ty = useRoute ? game.routeY : game.preyY
-    const tz = useRoute ? game.routeZ : game.preyZ
+    if (navPick && Math.hypot(navPick.x - game.x, navPick.y - game.y) < vh * 3) navPick = null
+    // 클릭 목적지 > 근처 실속 먹이 > 항로 ("자동항법 느림" 수리 유지)
+    const useRoute = !navPick && game.routeName !== null && game.preyDist > vh * 2.2
+    const tx = navPick ? navPick.x : useRoute ? game.routeX : game.preyX
+    const ty = navPick ? navPick.y : useRoute ? game.routeY : game.preyY
+    const tz = navPick ? navPick.z : useRoute ? game.routeZ : game.preyZ
     const dx = tx - game.x
     const dy = ty - game.y
     const d = Math.hypot(dx, dy) || 1
@@ -210,10 +213,19 @@ function boot(): void {
     }
     if (input.consumePressed('x')) scene.axes.visible = !scene.axes.visible
     if (input.consumePressed('n')) autoNav = !autoNav
-    if (autoNav && (input.move.x !== 0 || input.move.y !== 0 || input.lift !== 0)) autoNav = false
+    if (scene.pick) {
+      navPick = scene.pick
+      autoNav = true
+      scene.pick = null
+    }
+    if (autoNav && (input.move.x !== 0 || input.move.y !== 0 || input.lift !== 0)) {
+      autoNav = false
+      navPick = null
+    }
 
     if (!journalOpen) {
-      if (autoNav && game.preyDist < Infinity) autoSteer()
+      game.navAssist = autoNav
+      if (autoNav && (navPick || game.preyDist < Infinity)) autoSteer()
       else steer()
       game.update(wrapped, dt)
     }

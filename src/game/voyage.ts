@@ -341,6 +341,9 @@ export class Voyage {
   preyDist = Infinity
   /** 성간 순항 배율 — 먹이도 천체도 없는 공허에서만 붙는다 (HUD 가 읽는다) */
   cruise = 1
+  /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
+  navAssist = false
+  private refreshCd = 0
   private nearAny = Infinity
   /** 다음 항로 — 근처에 먹을 게 없으면 나침반이 별 지도의 목적지를 가리킨다 */
   routeName: string | null = null
@@ -880,7 +883,10 @@ export class Voyage {
       if (rC > pxOf(16) && rng.next() < 0.07) {
         const id = hashSeed(`${seed}:fs`)
         const far = rC > pxOf(600)
-        const roll = rng.next()
+        // 우주 노화 (조사 ㉗, 경량판): 회차가 쌓일수록 같은 하늘이 늙는다 —
+        // 푸른 별이 줄고 백색왜성·적색왜성이 는다 (항성 최종질량함수)
+        const ep = Math.min(2, Math.floor((this.voyages - 1) / 4)) * 0.05
+        const roll = rng.next() - ep
         let sr: number
         let scr: number
         let scg: number
@@ -969,6 +975,10 @@ export class Voyage {
     // 이사 — 섹터를 넘은 천체는 현재 위치의 **캐시된** 명단으로만 옮긴다.
     // 여기서 섹터를 생성하면 경계 걸친 위성이 이웃 생성을 연쇄 유발해
     // 우주 끝까지 기는 무한 크롤이 된다 (계측: 행 재현).
+    // 이 패스는 전 섹터×전 천체 문자열 생성이라 비싸다 — 순항 중 매 섹터
+    // 크로싱마다 돌리면 툭툭 끊긴다 (실플레이): 0.5초에 한 번만.
+    if (this.refreshCd <= 0) {
+      this.refreshCd = 0.5
     for (const [k, lst] of this.sectors) {
       for (let i = lst.length - 1; i >= 0; i--) {
         const b = lst[i]!
@@ -981,6 +991,7 @@ export class Voyage {
           }
         }
       }
+    }
     }
     this.active.length = 0
     const R = this.radius
@@ -1068,9 +1079,9 @@ export class Voyage {
     // 순항 z 수렴 — 별들이 구형으로 흩어진 우주에서 수동 xy 비행만으로도
     // 목적지 층에 닿아야 한다: 순항 중엔 나침반 표적의 z 로 미끄러져 간다
     // (실플레이: "성운 도착했는데 아무것도 안 보여" — 목적지가 발밑 수백만 px)
-    // **수직 입력이 있으면 자동 수렴은 완전히 꺼진다** — 손이 항상 이긴다
-    // (실플레이: "스페이스 누르는데 z 가 내려가" — 수렴력이 입력과 싸웠다)
-    if (this.cruise > 2 && this.preyDist < 1e8 && lift === 0) {
+    // z 수렴은 **자동 항법 중에만** — 손 비행의 고도는 손의 것이다
+    // (실플레이: "앞으로만 가는데 왜 z 가 움직이냐")
+    if (this.navAssist && this.cruise > 2 && this.preyDist < 1e8 && lift === 0) {
       this.vz += (this.preyZ - this.z) * Math.min(0.6, this.cruise * 0.09) * step
     }
     // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
@@ -1165,6 +1176,9 @@ export class Voyage {
           const heavy = 1 + R / 60
           const capMe = PULL_CAP_BY_ME * (1 + R / 80)
           let g = Math.min(capMe, (R * R * GRAV * MAW_PULL * heavy) / d2)
+          // 동역학 마찰 항적 (조사 ㉒, Chandrasekhar): 내가 지나간 뒤편의 것들이
+          // 항적 밀도에 끌려 뒤늦게 따라 떨어진다 — 후방 보정 (경량판)
+          if ((b.x - this.x) * this.vx + (b.y - this.y) * this.vy < 0) g *= 1.18
           // 먹이급 견인 보너스 — 두어 화면 밖에서도 다가오는 게 보여야 한다
           // ("내가 쟤 위치까지 가야만 따라와": 실플레이 — 사거리 R·20→R·34)
           if (edibleB) {
@@ -1307,13 +1321,18 @@ export class Voyage {
     // 접근하면 mapNear 가 줄며 자동 감속 — 도착 브레이크가 공짜로 따라온다.
     const vmax = base * 1.6 * Math.max(1, this.cruise) +
       (this.cruise > 1.5 ? Math.min(900000, mapNear * 0.14) : 0)
-    const sp0 = Math.hypot(this.vx, this.vy, this.vz)
-    if (sp0 > vmax) {
-      const k = vmax / sp0
+    // 상한은 수평/수직 분리 — 합산 클램프는 순항이 수평을 다 채우면 상승
+    // 성분을 깎아 "스페이스를 눌러도 도로 내려오는" 증상을 만든다 (실플레이)
+    const spH = Math.hypot(this.vx, this.vy)
+    if (spH > vmax) {
+      const k = vmax / spH
       this.vx *= k
       this.vy *= k
-      this.vz *= k
     }
+    const vzCap = vmax * 0.7
+    if (this.vz > vzCap) this.vz = vzCap
+    else if (this.vz < -vzCap) this.vz = -vzCap
+    const sp0 = Math.hypot(this.vx, this.vy, this.vz)
     const prevX = this.x
     const prevY = this.y
     const prevZ = this.z
@@ -1390,7 +1409,15 @@ export class Voyage {
         // 아니다: 별이 통째로 조석 붕괴해 낙하한다. "토성만한 블랙홀(≈태양 수천
         // 배 질량)이면 태양이고 카이퍼고 찰나"(실플레이)가 이 항이다. 첫 태양
         // 공성전(내가 가벼울 때 dom=1)은 그대로 남는다 — 성장의 서사는 불변.
-        const dom = Math.max(1, this.vol / (2 * b.r * b.r * b.r))
+        let dom = Math.max(1, this.vol / (2 * b.r * b.r * b.r))
+        // 최종 파섹 (조사 ㉕, 경량판): 은하심급(Core 거인)은 내 은하가 탄약이다 —
+        // 거느린 별들이 손실원뿔로 각운동량을 빼앗아 병합을 하드닝한다
+        if (b.kind === BodyKind.Core && b.r > 2000) {
+          dom *= 1 + this.halo.length / 90
+          if (this.halo.length > 0 && this.nibbleCd <= 0 && this.halo.length % 7 === 0) {
+            this.halo.pop()
+          }
+        }
         // 대상 크기 항 지수 1.4 — 목성이 ×4.8 무거워지자 태양보다 오래 걸리는
         // 역전이 생겼다 (계측): 큰 별일수록 가파르게 단단해야 질량 격차가 산다
         const bite = Math.min(
@@ -1653,6 +1680,17 @@ export class Voyage {
     for (const h of this.halo) {
       h.ang += h.w * step
       h.age += step
+    }
+
+    // QPE 심장박동 (조사 ㉔, 경량판) — 사형선고 받은 것이 곁을 도는 동안
+    // 원반이 "두-둥" 장단으로 맥동한다 (궤도 관통 X선 섬광의 근사)
+    for (const b of this.active) {
+      if (!b.doomed) continue
+      const dq = Math.hypot(b.x - this.x, b.y - this.y)
+      if (dq < R * 9) {
+        this.feed = Math.max(this.feed, 0.28 + 0.22 * Math.max(0, Math.sin(this.visualTime * 5.5 + b.id)))
+        break
+      }
     }
 
     // ── 퀘이사 게이지 — 에딩턴급 폭식이 이어지면 AGN 이 점화된다
@@ -1966,6 +2004,7 @@ export class Voyage {
       this.region = rg
     }
 
+    this.refreshCd -= step
     this.persistCd -= step
     if (this.dirty && this.persistCd <= 0) this.persist()
 
