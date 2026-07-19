@@ -345,6 +345,11 @@ export class Voyage {
   cruise = 1
   /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
   navAssist = false
+  /** 클릭 지정 목적지 — 속도·제동·z 수렴이 전부 이 좌표 기준 (main 세팅) */
+  navOn = false
+  navX = 0
+  navY = 0
+  navZ = 0
   /** 질량 과부하 (H 홀드) — 유효 질량 ×1000 (main 이 매 프레임 세팅) */
   surge = false
   private runT = 0
@@ -1107,11 +1112,15 @@ export class Voyage {
     // "훅훅" 요동친다 (실플레이). 1.5/s 로 미끄러뜨린다.
     this.mapNearS += (mapNear - this.mapNearS) * (1 - Math.exp(-1.5 * step))
     mapNear = Math.min(mapNear, this.mapNearS)
+    // 클릭 목적지 — 제동·속도의 기준 거리: 지정 항로 중엔 중간 계들을 빠르게
+    // 통과하고(느슨한 mapNear·6), 브레이크는 목적지 거리로 잡는다
+    const navDist = this.navOn ? Math.hypot(this.navX - this.x, this.navY - this.y) : Infinity
+    const brakeD = this.navOn ? Math.min(navDist, mapNear * 6) : mapNear
     // 게이트는 둘뿐: 의미 있는 천체(내 30%+)가 2.5화면 안에 있는가 + 지도 제동.
     // preyDist(잔부스러기 폴백 포함)를 게이트에 넣으면 성간의 상수 밀도 잔챙이가
     // 거대 R 의 문턱 안에 언제나 있어 순항이 죽는다 (계측 0~5%). 잔챙이·한입거리는
     // 순항을 막을 자격이 없다 — 지나가며 입이 쓸어담는다.
-    const empty = this.nearAny > base * 2.5 && mapNear > spNow * 1.4 + base * 8
+    const empty = this.nearAny > base * 2.5 && brakeD > spNow * 1.4 + base * 8
     const ck = empty && this.thrusting ? 0.7 : 4.5
     this.cruise += ((empty && this.thrusting ? 6 : 1) - this.cruise) * (1 - Math.exp(-ck * step))
     // 순항 z 수렴 — 별들이 구형으로 흩어진 우주에서 수동 xy 비행만으로도
@@ -1119,13 +1128,16 @@ export class Voyage {
     // (실플레이: "성운 도착했는데 아무것도 안 보여" — 목적지가 발밑 수백만 px)
     // z 수렴은 **자동 항법 중에만** — 손 비행의 고도는 손의 것이다
     // (실플레이: "앞으로만 가는데 왜 z 가 움직이냐")
-    if (this.navAssist && this.cruise > 2 && this.preyDist < 1e8 && lift === 0) {
-      this.vz += (this.preyZ - this.z) * Math.min(0.6, this.cruise * 0.09) * step
+    if (this.navAssist && this.cruise > 2 && lift === 0) {
+      const tzN = this.navOn ? this.navZ : this.preyDist < 1e8 ? this.preyZ : this.z
+      this.vz += (tzN - this.z) * Math.min(0.6, this.cruise * 0.09) * step
     }
     // 심공 가속 보강 — 거리 비례 상한(vmax)에 실제로 도달할 추력
-    // 원거리 클릭 항법(50광년 초과) — 표적 거리 비례로 더 세게 연다 (실플레이)
-    const farNav = this.navAssist && this.preyDist > 2500000
-      ? Math.min(3000000, this.preyDist * 0.2)
+    // 원거리 클릭 항법(50광년 초과) — **클릭 목적지 거리** 비례로 세게 연다.
+    // 나침반 거리(근처 먹이)를 보면 발동이 안 된다 ("카리나 왜 오래 걸려": 실플레이)
+    const targetD = this.navOn ? navDist : this.preyDist
+    const farNav = this.navAssist && targetD > 2500000
+      ? Math.min(3000000, targetD * 0.2)
       : 0
     const acc = thrustAcc(R) * this.cruise +
       (this.cruise > 3 ? Math.min(400000, mapNear * 0.06) + farNav * 0.5 : 0)
@@ -1317,7 +1329,10 @@ export class Voyage {
               const tty = rvy2 - uy * rad2
               const tmag = Math.hypot(ttx, tty)
               if (tmag > 1) {
-                const want = Math.sqrt(Math.max(1, g * d)) * 0.96
+                // **감속 전용** — 목표를 √(g·d)로 두면 과부하 시 g 폭등 →
+                // 접선 가속 → 원심 이탈 ("과부하 걸면 멀어져": 실플레이 확정).
+                // 원형화는 빠른 놈을 늦출 뿐, 절대 밀어 올리지 않는다.
+                const want = Math.min(tmag, Math.sqrt(Math.max(1, g * d)) * 0.96)
                 const kC = 1 - Math.exp(-(1.2 + domV) * proxV * step)
                 const scl = 1 + (want / tmag - 1) * kC
                 b.vx = this.vx + ux * rad2 + ttx * scl
@@ -1395,7 +1410,7 @@ export class Voyage {
     // ×6 고정으론 게 성운(11M px)이 32분이다 ("한번 가는데 30분": 실플레이).
     // 접근하면 mapNear 가 줄며 자동 감속 — 도착 브레이크가 공짜로 따라온다.
     const vmax = base * 1.6 * Math.max(1, this.cruise) +
-      (this.cruise > 1.5 ? Math.max(Math.min(900000, mapNear * 0.14), farNav) : 0)
+      (this.cruise > 1.5 ? Math.max(Math.min(900000, brakeD * 0.14), farNav) : 0)
     // 상한은 수평/수직 분리 — 합산 클램프는 순항이 수평을 다 채우면 상승
     // 성분을 깎아 "스페이스를 눌러도 도로 내려오는" 증상을 만든다 (실플레이)
     const spH = Math.hypot(this.vx, this.vy)

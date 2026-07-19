@@ -239,6 +239,13 @@ function boot(): void {
     if (!journalOpen) {
       game.navAssist = autoNav
       game.surge = surgeOn
+      // 클릭 목적지를 시뮬에 정식 전달 — 속도·제동·z 수렴이 전부 이 좌표 기준
+      game.navOn = navPick !== null
+      if (navPick) {
+        game.navX = navPick.x
+        game.navY = navPick.y
+        game.navZ = navPick.z
+      }
       if (autoNav && (navPick || game.preyDist < Infinity)) autoSteer()
       else steer()
       game.update(wrapped, dt)
@@ -303,7 +310,11 @@ function boot(): void {
     // 다음 항로 — 공허에서 게임이 안 끝났다고 말하는 줄
     const lyd = game.routeDist / LY
     const navTag = autoNav ? '  ·  자동 항법(N 해제)' : ''
-    const routeLine = game.routeName
+    // 클릭 지정 목적지가 있으면 HUD 도 그걸 말한다 ("찍었는데 왜 프록시마": 실플레이)
+    const routeLine = navPick
+      ? `\n지정 항로  ${navPick.name} · ${(Math.hypot(navPick.x - game.x, navPick.y - game.y) / LY).toFixed(1)}광년` +
+        (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '') + navTag
+      : game.routeName
       ? `\n다음 항로  ${game.routeName} · ${lyd >= 0.1 ? `${lyd.toFixed(1)}광년` : `${Math.round(game.routeDist / 1000)}k`}` +
         (game.cruise > 1.5 ? `  ·  성간 순항 ×${game.cruise.toFixed(1)}` : '') + navTag
       : (game.cruise > 1.5 ? `\n성간 순항 ×${game.cruise.toFixed(1)}${navTag}` : navTag ? `\n${navTag.trim()}` : '')
