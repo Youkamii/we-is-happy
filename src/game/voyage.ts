@@ -284,6 +284,8 @@ export class Voyage {
 
   // ── 세계
   private readonly sectors = new Map<string, Body[]>()
+  /** 캐시 밖으로 끌려간 천체들 — 항상 활성, 섹터가 돌아오면 재편입 */
+  private readonly wanderers: Body[] = []
   readonly active: Body[] = []
   private activeKey = ''
   private readonly eaten = new Set<number>()
@@ -411,6 +413,7 @@ export class Voyage {
     this.halo.length = 0
     this.streamIn = 0
     this.sectors.clear()
+    this.wanderers.length = 0
     this.solSun = null
     this.activeKey = ''
     this.rivals.length = 0
@@ -990,10 +993,28 @@ export class Voyage {
           if (target) {
             lst.splice(i, 1)
             target.push(b)
+          } else {
+            // 캐시 밖으로 끌려간 천체는 **떠돌이 명단**으로 — 옛 명단에 남기면
+            // 존재하는데 렌더에서 사라진다 (실플레이: 끌려오던 태양 증발)
+            lst.splice(i, 1)
+            this.wanderers.push(b)
           }
         }
       }
     }
+    }
+    // 떠돌이 재편입 — 섹터가 캐시되면 돌아가고, 아니면 그대로 활성에 남는다
+    for (let i = this.wanderers.length - 1; i >= 0; i--) {
+      const b = this.wanderers[i]!
+      if (this.eaten.has(b.id)) {
+        this.wanderers.splice(i, 1)
+        continue
+      }
+      const home = this.sectors.get(`${Math.floor(b.x / SECTOR)},${Math.floor(b.y / SECTOR)}`)
+      if (home) {
+        home.push(b)
+        this.wanderers.splice(i, 1)
+      }
     }
     this.active.length = 0
     const R = this.radius
@@ -1012,6 +1033,11 @@ export class Voyage {
           if (!this.rivals.some((r) => r.id === rv.id)) this.rivals.push(rv)
         }
       }
+    }
+    // 떠돌이는 언제나 활성 — 끌고 다니는 태양이 사라지면 안 된다
+    for (const b of this.wanderers) {
+      if (this.eaten.has(b.id) || b.r < tiny) continue
+      this.active.push(b)
     }
     for (let i = this.rivals.length - 1; i >= 0; i--) {
       if (!rivalIds.has(this.rivals[i]!.id)) this.rivals.splice(i, 1)
@@ -1241,7 +1267,9 @@ export class Voyage {
             // 점성은 **탈출만** 죽인다 — 접근 속도까지 죽이면 내가 다가갈 때
             // 먹이가 뱃머리 파도처럼 밀려간다 ("가까이 가면 멀어져": 실플레이)
             const vr0 = rvx * ux + rvy * uy + rvz * uz
-            const vr = vr0 > 0 ? vr0 : vr0 * Math.exp(-step * 5 * prox)
+            // 과부하 중엔 탈출 감쇠 ×30 — 슬링샷으로 빠져나가는 놈이 없어야
+            // "1000배로 잡는데 도망간다"가 안 된다 (실플레이)
+            const vr = vr0 > 0 ? vr0 : vr0 * Math.exp(-step * 5 * prox * (this.surge ? 30 : 1))
             // 각운동량 사형선고 — 슈바르츠실트 포획은 거리가 아니라 각운동량
             // 조건이다 (L < 4GM/c 이면 반드시 낙하: 조사 A). 게임 눈금 근사.
             if (!b.doomed && d < R * 24 && vr0 < 0) {
