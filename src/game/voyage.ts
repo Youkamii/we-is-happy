@@ -1679,6 +1679,10 @@ export class Voyage {
         // 성찬은 한입감 나침반이 따로 가리킨다.
         if (this.eaten.has(MAP_IDS[i]!)) continue
         const s = STAR_MAP[i]!
+        // 체급 인식 — 내 질량의 8배가 넘는 앵커는 아직 내 항로가 아니다:
+        // 어쩌지도 못할 별에 데려다 처박는 항법은 항법이 아니다 (실플레이).
+        // 커질수록 베텔게우스·궁수자리 A* 가 차례로 항로에 열린다.
+        if (s.r * s.r * s.r > this.vol * 8) continue
         const d = Math.hypot(s.x - this.x, s.y - this.y, s.z - this.z)
         if (d < best) {
           best = d

@@ -157,8 +157,8 @@ function boot(): void {
     const dy = ty - game.y
     const d = Math.hypot(dx, dy) || 1
     const sp = Math.hypot(game.vx, game.vy)
-    if (!useRoute && d < sp * 0.7 && sp > 1) {
-      // 도착 브레이크 — 지나치기 전에 역추진 (봇 검증 로직)
+    if (d < sp * 0.7 && sp > 1) {
+      // 도착 브레이크 — 항로든 먹이든, 지나치기 전에 역추진 (봇 검증 로직)
       w.move.x = -game.vx / sp
       w.move.y = -game.vy / sp
     } else {
