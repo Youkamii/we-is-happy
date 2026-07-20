@@ -14,7 +14,8 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { hashSeed } from '../engine/rng'
 import { HOLES, STAR_MAP, lyOf } from '../game/starmap'
-import { BodyKind, bhRadius, bodyRof, type Voyage } from '../game/voyage'
+import { GALAXIES } from '../game/galaxy'
+import { BodyKind, SCELL, bhRadius, bodyRof, type Voyage } from '../game/voyage'
 
 /** 행성 대기 림 색 — 대기 조성이 곧 색이다 */
 const EARTH_ID = hashSeed('sol:지구')
@@ -405,6 +406,12 @@ export class Scene3D {
   private readonly planetTexId: number[] = []
   private readonly nebTex: THREE.Texture[] = []
   private readonly galTex: THREE.Texture[] = []
+  /** T0 은하 임포스터 — 먼 은하는 원반 그림 한 장으로 하늘에 떠 있다 (P5) */
+  private readonly galSprites: THREE.Sprite[] = []
+  /** T1 별 점군 — 활성창 밖 별셀 씨앗을 점으로 (물리 0, 실체와 같은 씨앗) */
+  private fieldGeo!: THREE.BufferGeometry
+  private fieldMat!: THREE.PointsMaterial
+  private fieldKey = ''
   private readonly nebMapId: number[] = []
   private readonly starTex: THREE.Texture[] = []
   private readonly starMeshes: THREE.Mesh[] = []
@@ -516,6 +523,30 @@ export class Scene3D {
     }
     for (let i = 0; i < 4; i++) this.nebTex.push(nebulaTexture(313 + i * 97))
     for (let i = 0; i < 3; i++) this.galTex.push(galaxyTexture(511 + i * 131))
+    // T0 은하 임포스터 (P5) — 국부군 은하마다 한 장
+    for (let i = 0; i < GALAXIES.length; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: this.galTex[i % this.galTex.length]!,
+        blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
+      }))
+      sp.visible = false
+      this.galSprites.push(sp)
+      this.scene.add(sp)
+    }
+    // T1 별 점군 (P5) — 별셀 씨앗 최대 2400점
+    this.fieldGeo = new THREE.BufferGeometry()
+    this.fieldGeo.setAttribute('position',
+      new THREE.BufferAttribute(new Float32Array(2400 * 3), 3))
+    this.fieldGeo.setAttribute('color',
+      new THREE.BufferAttribute(new Float32Array(2400 * 3), 3))
+    this.fieldGeo.setDrawRange(0, 0)
+    this.fieldMat = new THREE.PointsMaterial({
+      size: 600, vertexColors: true, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
+    })
+    const fieldPts = new THREE.Points(this.fieldGeo, this.fieldMat)
+    fieldPts.frustumCulled = false
+    this.scene.add(fieldPts)
     // 근접 항성 글로브 — 표면이 끓는 물체 (솜뭉치 후광 금지)
     for (let i = 0; i < 4; i++) this.starTex.push(starTexture(701 + i * 61))
     for (let i = 0; i < 8; i++) {
@@ -1008,6 +1039,62 @@ void main(){
     for (let i = labelN; i < 7; i++) {
       this.labels[i]!.style.display = 'none'
       this.labelSysIdx[i] = -1
+    }
+
+    // T0 은하 임포스터 (P5) — 밖에서 보면 은하가 원반 그림으로 하늘에 떠 있고,
+    // 안(rDisk·1.15)에 들어가면 임포스터가 걷히며 별 점군·실체가 자리를 잇는다
+    for (let i = 0; i < GALAXIES.length; i++) {
+      const G = GALAXIES[i]!
+      const sp = this.galSprites[i]!
+      const dgx = G.cx - g.x
+      const dgy = G.cy - g.y
+      const dgz = G.cz - g.z
+      const dg = Math.hypot(dgx, dgy, dgz) || 1
+      if (dg < G.rDisk * 1.15) {
+        sp.visible = false
+        continue
+      }
+      sp.visible = true
+      sp.position.set(
+        px + (dgx / dg) * skyR * 0.97,
+        py + (dgz / dg) * skyR * 0.97,
+        pz + (dgy / dg) * skyR * 0.97,
+      )
+      const ang = Math.min(0.42, (G.rDisk * 2.2) / dg)
+      sp.scale.setScalar(skyR * Math.max(0.015, ang))
+      ;(sp.material as THREE.SpriteMaterial).opacity =
+        0.85 * Math.min(1, (dg / (G.rDisk * 1.15) - 1) * 2.5)
+    }
+
+    // T1 별 점군 (P5) — 플레이어 주변 별셀 7×7 씨앗을 점으로 (물리 0).
+    // 활성창 안은 실체 Body 가 그리므로 제외 — 같은 씨앗이라 자리가 안 튄다.
+    {
+      const ccx = Math.floor(g.x / SCELL)
+      const ccy = Math.floor(g.y / SCELL)
+      const key = `${ccx},${ccy},${oX3},${oY3},${oZ3}`
+      if (key !== this.fieldKey) {
+        this.fieldKey = key
+        const pos = this.fieldGeo.getAttribute('position') as THREE.BufferAttribute
+        const col = this.fieldGeo.getAttribute('color') as THREE.BufferAttribute
+        let n = 0
+        const actR = 118000 // 활성창(±115.2k) + 여유
+        for (let cy2 = ccy - 3; cy2 <= ccy + 3; cy2++) {
+          for (let cx2 = ccx - 3; cx2 <= ccx + 3; cx2++) {
+            for (const s of g.cellSystems(cx2, cy2)) {
+              if (n >= 2400) break
+              if (Math.abs(s.x - g.x) < actR && Math.abs(s.y - g.y) < actR) continue
+              pos.setXYZ(n, s.x - oX3, s.z - oZ3, s.y - oY3)
+              if (s.arm > 0.4) col.setXYZ(n, 0.62, 0.74, 1.0)
+              else col.setXYZ(n, 1.0, 0.8, 0.58)
+              n++
+            }
+          }
+        }
+        this.fieldGeo.setDrawRange(0, n)
+        pos.needsUpdate = true
+        col.needsUpdate = true
+      }
+      this.fieldMat.size = Math.max(400, dist * 0.02)
     }
 
     // 조명 — 가장 가까운 태양이 태양이다

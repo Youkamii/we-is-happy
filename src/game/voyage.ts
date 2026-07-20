@@ -33,7 +33,7 @@ const HOLE_IDS: readonly number[] = HOLES.map((h) => hashSeed(`hole:${h.name}`))
 
 /** 별셀 — 밀도장 표본화 격자 (아키텍처 §3-2). SECTOR(2400)와 분리: 밀도
  *  초월함수 평가를 셀당 1회로 캐시해 프레임당 ~4회로 만든다. */
-const SCELL = 262144
+export const SCELL = 262144
 /** 밀도 → 셀당 기대 항성계 수 계수 — 원반 중반 동시 활성 ~1~4 목표 (§8-3) */
 const SYS_PER_RHO = 8
 
@@ -1162,7 +1162,8 @@ export class Voyage {
 
   /** 별셀의 결정론 항성계 씨앗 — 밀도 평가는 셀당 1회, 캐시 (아키텍처 §3-2).
    *  씨드는 정수 hash 만 — 부동소수·순서 의존 금지 (P0 결정론 방벽이 잰다) */
-  private cellSystems(cx: number, cy: number): readonly FieldSeed[] {
+  /** 렌더 T1 점군도 이 씨앗을 그대로 그린다 — 점↔실체의 단일 진실원 (§4) */
+  cellSystems(cx: number, cy: number): readonly FieldSeed[] {
     const key = `${cx},${cy}`
     const hit = this.starCells.get(key)
     if (hit) return hit
@@ -1619,7 +1620,8 @@ export class Voyage {
     const farNav = this.navOn
       ? navAway
         ? 0
-        : Math.max(0, (navDist - base * 8) * 0.6)
+        : // 심공 다이얼 (P6, §5): 은하 횡단·은하간(10억px+)은 0.9/s — 십수 초
+          Math.max(0, (navDist - base * 8) * (navDist > 1e9 ? 0.9 : 0.6))
       : this.navAssist && targetD > 2500000
         ? Math.min(3000000, targetD * 0.2)
         : 0
@@ -2628,7 +2630,20 @@ export class Voyage {
       else if (dSol < SHELL.oortIn) rg = '산란 원반'
       else if (dSol < SHELL.oortOut) rg = '오르트 구름'
       else {
-        rg = '성간 공간'
+        // 지역 3단 (P6, 아키텍처 §5) — [은하] · [구역], 근접 실명 계가 이긴다
+        const G = galaxyOf(this.x, this.y, 0)
+        if (G === null) rg = '은하간 공허'
+        else {
+          const [rGc] = galacticCyl(G, this.x, this.y, 0)
+          const zone = rGc < G.rBulge
+            ? '팽대부'
+            : rGc > G.rDisk
+              ? '헤일로'
+              : armProximity(G, rGc, Math.atan2(this.y - G.cy, this.x - G.cx)) > 0.5
+                ? '나선팔'
+                : '원반'
+          rg = `${G.name} ${zone}`
+        }
         let bd = Infinity
         for (const s of STAR_MAP) {
           const d = Math.hypot(s.x - this.x, s.y - this.y) - s.r
