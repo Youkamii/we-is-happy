@@ -1620,8 +1620,13 @@ export class Voyage {
     const farNav = this.navOn
       ? navAway
         ? 0
-        : // 심공 다이얼 (P6, §5): 은하 횡단·은하간(10억px+)은 0.9/s — 십수 초
-          Math.max(0, (navDist - base * 8) * (navDist > 1e9 ? 0.9 : 0.6))
+        : // 심공 다이얼 (P6) + 늦은 제동: 남은 거리 정비례는 수백 광년 전부터
+          // 슬금슬금 느려져 루즈했다 ("거의 5광년 남았을 때부터 감속시켜":
+          // 실플레이). 8광년 밖에선 초당 100광년 바닥을 밟고, 안쪽은 2/s
+          // 급제동 — 도착 직전에 훅 선다.
+          navDist > 4e5
+          ? Math.max(5e6, (navDist - base * 8) * (navDist > 1e9 ? 0.9 : 0.6))
+          : Math.max(0, (navDist - base * 8) * 2.0)
       : this.navAssist && targetD > 2500000
         ? Math.min(3000000, targetD * 0.2)
         : 0
