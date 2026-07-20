@@ -369,6 +369,10 @@ export class Scene3D {
   zoomBias = 1
   /** 줌아웃 상한 — 몸이 클수록 열린다 ("커지면 더 멀리서도 보게": 실플레이) */
   private zoomMax = 2.4
+  /** 부동 원점(three-공간) — 실척 좌표(±1.4e11px)에서 float32 파탄을 막는
+   *  유일한 방벽 (아키텍처 §2-2). GPU 로 가는 모든 좌표는 이 원점 상대값.
+   *  main 의 화면 투영도 이걸 빼고 project 해야 한다. */
+  readonly origin = new THREE.Vector3()
 
   private readonly lit: THREE.InstancedMesh
   private readonly emis: THREE.InstancedMesh
@@ -827,9 +831,24 @@ void main(){
     const R = g.radius
     /** 시각 몸 — 영향권(R)과 분리된 진짜 "검은 몸". 지구를 먹어도 거의 안 큰다 */
     const BR = bodyRof(R)
-    const px = g.x
-    const py = g.z // three y = 게임 z (위)
-    const pz = g.y
+    // ── 부동 원점 (Phase 1) — 4096px 양자화된 O 를 플레이어 곁에 두고,
+    // px/py/pz 는 **O-상대**가 된다. 시뮬(g.x 등)은 절대 double 그대로.
+    // 절대 좌표가 필요한 차분(sys.x - …)은 g.x 를 직접 쓴다.
+    const oX3 = Math.round(g.x / 4096) * 4096
+    const oY3 = Math.round(g.y / 4096) * 4096
+    const oZ3 = Math.round(g.z / 4096) * 4096
+    this.origin.set(oX3, oZ3, oY3)
+    const px = g.x - oX3
+    const py = g.z - oZ3 // three y = 게임 z (위)
+    const pz = g.y - oY3
+    // 유계 불변식 — 리베이스 누락은 눈이 아니라 어서션이 잡는다 (§2-3)
+    if (import.meta.env.DEV) {
+      for (const b of g.active) {
+        console.assert(
+          Math.abs(b.x - oX3) < 200000 && Math.abs(b.y - oY3) < 200000,
+          'render offset overflow', b.id)
+      }
+    }
 
     // 카메라 — 티끌일 땐 몸의 ~14배까지 바짝(행성이 하늘을 채운다), R5부터 표준
     const kCam = 0.78 - 0.36 * Math.max(0, 1 - R / 5)
@@ -855,13 +874,13 @@ void main(){
     if (this.scene.fog instanceof THREE.FogExp2) this.scene.fog.density = 0.1 / (dist * 18)
     this.stars.position.copy(this.camera.position)
     this.stars.scale.setScalar(dist * 40)
-    // 워프 시차 — 위치 비례로 하늘이 흐른다 ("빨리 움직이는데 배경 별은
-    // 그대로": 실플레이). 저속에선 거의 0 — 별은 원래 멀어서 그게 맞다.
-    this.stars.rotation.set(pz * 1.6e-8, px * 2.2e-8, 0)
+    // 워프 시차 — **절대** 위치 비례로 하늘이 흐른다 (원점 상대면 4096 격자
+    // 마다 하늘이 튄다). 저속에선 거의 0 — 별은 원래 멀어서 그게 맞다.
+    this.stars.rotation.set(g.y * 1.6e-8, g.x * 2.2e-8, 0)
     this.band.position.copy(this.camera.position)
     this.band.scale.setScalar(dist * 40)
     // 기준면은 황도(z=0)에 고정 — 수직 기동 중에만 뚜렷해진다
-    this.ecliptic.position.set(px, 0, pz)
+    this.ecliptic.position.set(px, -oZ3, pz) // 황도는 게임 z=0 절대 평면 — 원점 상대로 이동
     this.ecliptic.scale.setScalar(dist * 2.2)
     ;(this.ecliptic.material as THREE.Material).opacity =
       0.04 + Math.min(0.18, Math.abs(g.vz) / (dist * 0.5))
@@ -878,9 +897,9 @@ void main(){
     for (let i = 0; i < STAR_MAP.length; i++) {
       const sys = STAR_MAP[i]!
       const sp = this.landmarks[i]!
-      const dx = sys.x - px
-      const dy = sys.z - py
-      const dz = sys.y - pz
+      const dx = sys.x - g.x
+      const dy = sys.z - g.z
+      const dz = sys.y - g.y
       const d3 = Math.hypot(dx, dy, dz) || 1
       d3s.push(d3)
       // 별점은 실물 지오메트리가 읽히는 거리까지 산다 — 12화면 일괄 컷은 그
@@ -915,7 +934,7 @@ void main(){
       // 도착 코앞(1.2화면)에서만 접는다 — 목적지 핀은 항법이 풀릴 때까지 남는다
       if (!sp.visible && d3 < dist * 1.2 && !pinned) continue
       if (sp.visible) this.v3.copy(sp.position).project(this.camera)
-      else this.v3.set(sys.x, sys.z, sys.y).project(this.camera)
+      else this.v3.set(sys.x - oX3, sys.z - oZ3, sys.y - oY3).project(this.camera)
       if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
         this.labelSysIdx[labelN] = i
         const lb = this.labels[labelN++]!
@@ -948,7 +967,7 @@ void main(){
       let hd2 = Infinity
       for (let j = 0; j < HOLES.length; j++) {
         const hh = HOLES[j]!
-        const dh = Math.hypot(hh.x - px, hh.z - py, hh.y - pz) || 1
+        const dh = Math.hypot(hh.x - g.x, hh.z - g.z, hh.y - g.y) || 1
         if (dh < hd1) {
           h2 = h1
           hd2 = hd1
@@ -962,7 +981,7 @@ void main(){
       for (const [j, dh] of [[h1, hd1], [h2, hd2]] as const) {
         if (j < 0 || labelN >= 7) continue
         const hh = HOLES[j]!
-        this.v3.set(hh.x, hh.z, hh.y).project(this.camera)
+        this.v3.set(hh.x - oX3, hh.z - oZ3, hh.y - oY3).project(this.camera)
         if (this.v3.z < 1 && Math.abs(this.v3.x) < 0.95 && Math.abs(this.v3.y) < 0.92) {
           this.labelSysIdx[labelN] = STAR_MAP.length + j
           const lb = this.labels[labelN++]!
@@ -1017,7 +1036,7 @@ void main(){
       }
     }
     if (sunB) {
-      this.sun.position.set(sunB.x - px, sunB.z - py + 1, sunB.y - pz)
+      this.sun.position.set(sunB.x - g.x, sunB.z - g.z + 1, sunB.y - g.y)
       this.sun.intensity = 1.4
     } else {
       this.sun.position.set(1, 2, 1)
@@ -1028,9 +1047,9 @@ void main(){
 
     // 천체
     for (const b of g.active) {
-      const bx = b.x
-      const by = b.z
-      const bz = b.y
+      const bx = b.x - oX3
+      const by = b.z - oZ3
+      const bz = b.y - oY3
       // 흡수 중이면 나선으로 감기며 줄어들고, 지평선 앞에서 붉게 저물다 얼어붙는다
       let sc = b.r
       let ax = bx
@@ -1413,7 +1432,7 @@ void main(){
       }
       const k = src.life / src.max
       sp.visible = true
-      sp.position.set(src.x, src.z, src.y)
+      sp.position.set(src.x - oX3, src.z - oZ3, src.y - oY3)
       sp.scale.setScalar(src.size * 1.7)
       // 회전 변주 — 같은 텍스처의 복붙 떡 방지
       sp.material.rotation = i * 2.39996 + (1 - k) * 0.6
@@ -1436,7 +1455,7 @@ void main(){
       const rr = bhRadius(rv.vol)
       const rBody = bodyRof(rr)
       m.visible = true
-      m.position.set(rv.x, rv.z, rv.y)
+      m.position.set(rv.x - oX3, rv.z - oZ3, rv.y - oY3)
       m.scale.setScalar(rBody) // 검은 몸은 작다 — 후광(영향권)이 크기를 말한다
       const threat = rr > R
       sp.visible = true
@@ -1512,7 +1531,7 @@ void main(){
       const k = (g.waveT - i * 0.22) / 1.6
       if (k > 0 && k < 1) {
         wv.visible = true
-        wv.position.set(g.waveX, g.waveZ, g.waveY)
+        wv.position.set(g.waveX - oX3, g.waveZ - oZ3, g.waveY - oY3)
         wv.scale.setScalar(R * (2 + k * 60))
         ;(wv.material as THREE.MeshBasicMaterial).opacity = (1 - k) * 0.6
       } else {
@@ -1591,7 +1610,7 @@ void main(){
     this.lensPass.uniforms['uQuasar']!.value = g.quasar
     // 중력파 → 렌즈 물결
     if (g.waveT < 1.6) {
-      this.v3.set(g.waveX, g.waveZ, g.waveY).project(this.camera)
+      this.v3.set(g.waveX - oX3, g.waveZ - oZ3, g.waveY - oY3).project(this.camera)
       this.lensPass.uniforms['uWaveC']!.value.set((this.v3.x + 1) / 2, (this.v3.y + 1) / 2)
       this.lensPass.uniforms['uWaveT']!.value = this.v3.z < 1 ? g.waveT : 9
     } else {

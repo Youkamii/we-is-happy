@@ -311,7 +311,12 @@ function boot(): void {
 
     // 나침반 — 먹이를 화면에 투영해, 화면 밖이면 가장자리 화살표로
     if (game.preyDist < Infinity) {
-      proj.set(game.preyX, game.preyZ, game.preyY).project(scene.camera)
+      // 부동 원점 — 카메라가 O-상대이므로 투영 전에 scene.origin 을 뺀다
+      proj.set(
+        game.preyX - scene.origin.x,
+        game.preyZ - scene.origin.y,
+        game.preyY - scene.origin.z,
+      ).project(scene.camera)
       const w = canvas.clientWidth
       const h = canvas.clientHeight
       const behind = proj.z > 1
