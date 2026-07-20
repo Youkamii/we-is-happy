@@ -116,12 +116,14 @@ function boot(): void {
   // 블랙홀 실험 — 버튼을 누르면 10초 카운트 후 30초에 걸쳐 붕괴 (사용자 사양).
   // 누르기 전까지 나는 평범한 지구다: 아무것도 끌지도, 먹지도 않는다.
   const expBtn = document.createElement('button')
-  expBtn.textContent = '블랙홀 실험 시작'
+  expBtn.textContent = '☺ 행복 버튼'
   expBtn.style.cssText =
-    'position:absolute;right:16px;top:14px;font:700 14px/1.6 ui-monospace,monospace;' +
-    'color:#ffd9a8;background:rgba(24,14,6,.85);border:1px solid #d9a84c;padding:8px 16px;' +
+    'position:absolute;right:16px;top:14px;font:800 15px/1.6 ui-monospace,monospace;' +
+    'color:#3b1020;background:linear-gradient(135deg,#ffd9a8,#ff9ec0 60%,#ffb066);' +
+    'border:none;border-radius:999px;padding:10px 22px;letter-spacing:.14em;' +
+    'box-shadow:0 0 18px rgba(255,158,192,.75),0 0 42px rgba(255,176,102,.4);' +
     // #ui 는 pointer-events:none — 명시로 켜야 클릭이 닿는다 ("눌러도 안 움직여")
-    'cursor:pointer;letter-spacing:.12em;display:none;pointer-events:auto;'
+    'cursor:pointer;display:none;pointer-events:auto;'
   expBtn.addEventListener('click', () => {
     game.startExperiment()
   })
@@ -148,15 +150,14 @@ function boot(): void {
       d.style.cssText = style
       center.appendChild(d)
     }
-    line('검은 입', 'font-size:56px;letter-spacing:.5em;color:#ffd9a8')
-    line('너는 지구다 — 아직은.', 'margin-top:16px;font-size:14px;color:#8fa8c4;line-height:2')
-    line('우측 상단의 블랙홀 실험 버튼을 누르면 10초 뒤, 30초에 걸쳐 붕괴가 시작된다', 'font-size:14px;color:#ffb066;line-height:2')
-    line('삼키면 커지고, 커지면 어제 못 삼키던 것을 삼킨다 — 달부터. 행성. 태양.', 'font-size:14px;color:#8fa8c4;line-height:2')
-    line('카이퍼 벨트와 오르트 구름을 지나면, 빈 우주에선 성간 순항이 붙는다', 'font-size:13px;color:#6f8299;line-height:2;margin-top:14px')
-    line('나침반이 언제나 다음 별을 가리킨다 — 은하수는 넓고, 끝은 안드로메다 너머다', 'font-size:13px;color:#6f8299;line-height:2')
-    line('이동 WASD · 상승 스페이스 · 하강 시프트', 'font-size:13px;color:#ffd9a8;line-height:2')
-    line('시점: 마우스 왼쪽 드래그 · 줌 휠 | J 명부 · N 자동 항법 · H 질량 과부하(토글)', 'font-size:13px;color:#6f8299;line-height:2')
-    line('아무 키나 눌러 눈을 뜬다 — 항해는 언제나 지구에서 시작한다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
+    line('We is Happy', 'font-size:56px;letter-spacing:.35em;color:#ffd9a8')
+    line('"모두 하나가 되면 행복해질 수 있어."', 'margin-top:16px;font-size:17px;color:#ffb8c8;line-height:2;text-shadow:0 0 18px rgba(255,158,192,.5)')
+    line('키보드 — 이동 W A S D · 상승 스페이스 · 하강 시프트', 'margin-top:20px;font-size:13px;color:#ffd9a8;line-height:2')
+    line('마우스 — 왼쪽 드래그 시점 회전 · 휠 줌', 'font-size:13px;color:#ffd9a8;line-height:2')
+    line('좌표 클릭 — 화면의 천체 이름을 누르면 그곳까지 자동 비행', 'font-size:13px;color:#ffd9a8;line-height:2')
+    line('자동 항법 — N 켜고 끄기 · 먹이와 다음 항로를 알아서 쫓는다', 'font-size:13px;color:#ffd9a8;line-height:2')
+    line('J 명부 · H 질량 과부하(토글) · X 축 표시', 'font-size:12px;color:#6f8299;line-height:2')
+    line('아무 키나 눌러 시작 — 그리고 우측 상단의 행복 버튼을 누른다', 'margin-top:20px;font-size:15px;color:#ffe6b8')
     if (game.journal.length > 0) {
       line(
         `— ${game.voyages}번째 항해 · 명부 ${game.journal.length} —`,

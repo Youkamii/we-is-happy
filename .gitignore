@@ -10,3 +10,5 @@ dist-ssr/
 coverage/
 *.log
 .gstack/
+
+.vercel
