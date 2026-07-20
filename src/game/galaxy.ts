@@ -109,11 +109,20 @@ export function galaxyDensityAt(G: Galaxy, x: number, y: number, z: number): num
   return bulge + thin * (1 + 0.8 * arm) + thick + halo
 }
 
-/** 이 자리를 품은 은하 — 없으면 null = 은하간 진짜 공허 (무소속 0의 게이트) */
+/** 이 자리를 품은 은하 — 없으면 null = 은하간 진짜 공허 (무소속 0의 게이트).
+ *  **최대 밀도** 귀속 (P7 CONFIRMED): 첫 일치 반환은 우리 은하 헤일로(7·rDisk
+ *  = 34만 광년)가 마젤란(15.8만 광년)을 통째로 삼켰다 — 위성은하 곁에선
+ *  위성의 원반 밀도가 모은하의 헤일로 꼬리보다 압도적으로 크다. */
 export function galaxyOf(x: number, y: number, z: number): Galaxy | null {
+  let best: Galaxy | null = null
+  let bestRho = 0
   for (const G of GALAXIES) {
     if (Math.abs(x - G.cx) > G.rHalo || Math.abs(y - G.cy) > G.rHalo) continue
-    if (galaxyDensityAt(G, x, y, z) > 0) return G
+    const rho = galaxyDensityAt(G, x, y, z)
+    if (rho > bestRho) {
+      bestRho = rho
+      best = G
+    }
   }
-  return null
+  return best
 }

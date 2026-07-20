@@ -319,6 +319,8 @@ export class Voyage {
   private readonly eaten = new Set<number>()
   /** 별셀 캐시 — SCELL 격자당 결정론 항성계 씨앗 (Phase 4) */
   private readonly starCells = new Map<string, FieldSeed[]>()
+  /** 워프 재구축 스로틀 시계 (P7 성능) */
+  private lastRebuildT = -1
   private solSun: Body | null = null
 
   // ── 포식
@@ -1167,7 +1169,8 @@ export class Voyage {
     const key = `${cx},${cy}`
     const hit = this.starCells.get(key)
     if (hit) return hit
-    if (this.starCells.size > 512) this.starCells.clear()
+    // 캡 2048 — 512 는 T1 점군의 상주 49셀까지 함께 버리는 파괴적 소거였다 (P7)
+    if (this.starCells.size > 2048) this.starCells.clear()
     const out: FieldSeed[] = []
     this.starCells.set(key, out)
     const rng = new Rng(hashSeed(`sc:${cx}:${cy}`))
@@ -1340,12 +1343,22 @@ export class Voyage {
       const Gsec = galaxyOf(secX, secY, 0)
       if (Gsec) {
         // 항성계 — SCELL 별셀 시딩: 팽대부는 촘촘, 원반 변두리는 성기게,
-        // 나선팔 위는 청백 편향 (밀도장이 곧 우주의 지도다)
-        for (const fsd of this.cellSystems(
-          Math.floor(secX / SCELL), Math.floor(secY / SCELL))) {
-          if (Math.floor(fsd.x / SECTOR) !== sx || Math.floor(fsd.y / SECTOR) !== sy) continue
-          if (nearRealSystem(fsd.x, fsd.y)) continue // 실명 계 양보 (§8-5)
-          this.buildFieldSystem(fsd, list)
+        // 나선팔 위는 청백 편향 (밀도장이 곧 우주의 지도다).
+        // 섹터(2400)는 별셀(262144)의 정수배가 아니라 경계를 걸친다 — 겹치는
+        // 셀 전부(최대 4)를 조회해야 격자선의 "죽은 스트립"(점군엔 보이는데
+        // 실체가 안 태어나 다가가면 사라지는 별)이 없다 (P7 정합성 CONFIRMED)
+        const cx0 = Math.floor((sx * SECTOR) / SCELL)
+        const cx1 = Math.floor(((sx + 1) * SECTOR - 1) / SCELL)
+        const cy0 = Math.floor((sy * SECTOR) / SCELL)
+        const cy1 = Math.floor(((sy + 1) * SECTOR - 1) / SCELL)
+        for (let cyi = cy0; cyi <= cy1; cyi++) {
+          for (let cxi = cx0; cxi <= cx1; cxi++) {
+            for (const fsd of this.cellSystems(cxi, cyi)) {
+              if (Math.floor(fsd.x / SECTOR) !== sx || Math.floor(fsd.y / SECTOR) !== sy) continue
+              if (nearRealSystem(fsd.x, fsd.y)) continue // 실명 계 양보 (§8-5)
+              this.buildFieldSystem(fsd, list)
+            }
+          }
         }
         // 떠돌이 행성·갈색왜성·불씨·성간 혜성 — 은하의 주민들 (소속 각인)
         if (rng.next() < 0.05) {
@@ -1446,6 +1459,12 @@ export class Voyage {
     const N = this.rangeN()
     const key = `${sx},${sy},${N}`
     if (!force && key === this.activeKey) return
+    // 워프 스로틀 (P7 성능 CONFIRMED): 초고속(20만px/s+)에선 섹터 키가 매
+    // 프레임 바뀌어 (2N+1)²=9,409칸 재구축이 매 프레임 돌았다. 0.12초에
+    // 한 번 — 워프 중 잠깐 낡은 활성 목록은 무해하다 (전부 스쳐 지나간다).
+    if (!force && this.runT - this.lastRebuildT < 0.12 &&
+      Math.hypot(this.vx, this.vy) > 200000) return
+    this.lastRebuildT = this.runT
     this.activeKey = key
     // 이사 — 섹터를 넘은 천체는 현재 위치의 **캐시된** 명단으로만 옮긴다.
     // 여기서 섹터를 생성하면 경계 걸친 위성이 이웃 생성을 연쇄 유발해
@@ -1625,7 +1644,10 @@ export class Voyage {
           // 실플레이). 8광년 밖에선 초당 100광년 바닥을 밟고, 안쪽은 2/s
           // 급제동 — 도착 직전에 훅 선다.
           navDist > 4e5
-          ? Math.max(5e6, (navDist - base * 8) * (navDist > 1e9 ? 0.9 : 0.6))
+          ? Math.max(5e6, (navDist - base * 8) *
+              // 다이얼은 1e9~2e9 에서 0.6→0.9 연속 램프 — 계단은 은하 횡단 중
+              // 2만 광년 지점에서 가속이 덜컥였다 (P7 정합성 CONFIRMED)
+              (0.6 + 0.3 * Math.min(1, Math.max(0, (navDist - 1e9) / 1e9))))
           : Math.max(0, (navDist - base * 8) * 2.0)
       : this.navAssist && targetD > 2500000
         ? Math.min(3000000, targetD * 0.2)
@@ -2988,6 +3010,7 @@ export class Voyage {
       d.free = true
       d.hot = true
       d.origin = originName
+      d.gal = b.gal // 파편은 부모의 은하 소속을 잇는다 (P7 무소속 CONFIRMED)
       const sp = nova ? 200 + b.r0 * 0.5 : 40
       d.vx = Math.cos(a) * sp + b.vx
       d.vy = Math.sin(a) * sp + b.vy
@@ -3017,6 +3040,7 @@ export class Voyage {
       d.free = true
       d.hot = true
       d.origin = originName
+      d.gal = b.gal // 파편은 부모의 은하 소속을 잇는다 (P7 무소속 CONFIRMED)
       const speed = 150 + this.radius * 1.2
       d.vx = Math.cos(a) * speed * 0.3 + -Math.sin(a) * speed * 0.8 + b.vx
       d.vy = Math.sin(a) * speed * 0.3 + Math.cos(a) * speed * 0.8 + b.vy

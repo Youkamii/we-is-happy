@@ -411,7 +411,10 @@ export class Scene3D {
   /** T1 별 점군 — 활성창 밖 별셀 씨앗을 점으로 (물리 0, 실체와 같은 씨앗) */
   private fieldGeo!: THREE.BufferGeometry
   private fieldMat!: THREE.PointsMaterial
+  private fieldPts!: THREE.Points
   private fieldKey = ''
+  /** DEV 유계 어서션 샘플링 시계 — 매 프레임 전량 스캔 방지 (P7 성능) */
+  private assertT = -1
   private readonly nebMapId: number[] = []
   private readonly starTex: THREE.Texture[] = []
   private readonly starMeshes: THREE.Mesh[] = []
@@ -544,9 +547,9 @@ export class Scene3D {
       size: 600, vertexColors: true, transparent: true, opacity: 0.85,
       blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true,
     })
-    const fieldPts = new THREE.Points(this.fieldGeo, this.fieldMat)
-    fieldPts.frustumCulled = false
-    this.scene.add(fieldPts)
+    this.fieldPts = new THREE.Points(this.fieldGeo, this.fieldMat)
+    this.fieldPts.frustumCulled = false
+    this.scene.add(this.fieldPts)
     // 근접 항성 글로브 — 표면이 끓는 물체 (솜뭉치 후광 금지)
     for (let i = 0; i < 4; i++) this.starTex.push(starTexture(701 + i * 61))
     for (let i = 0; i < 8; i++) {
@@ -872,8 +875,10 @@ void main(){
     const px = g.x - oX3
     const py = g.z - oZ3 // three y = 게임 z (위)
     const pz = g.y - oY3
-    // 유계 불변식 — 리베이스 누락은 눈이 아니라 어서션이 잡는다 (§2-3)
-    if (import.meta.env.DEV) {
+    // 유계 불변식 — 리베이스 누락은 눈이 아니라 어서션이 잡는다 (§2-3).
+    // 초당 1회 샘플링 — 매 프레임 전량 스캔은 DEV 프레임을 어긋나게 한다 (P7)
+    if (import.meta.env.DEV && Math.floor(t) !== this.assertT) {
+      this.assertT = Math.floor(t)
       for (const b of g.active) {
         console.assert(
           Math.abs(b.x - oX3) < 200000 && Math.abs(b.y - oY3) < 200000,
@@ -1069,9 +1074,11 @@ void main(){
     // T1 별 점군 (P5) — 플레이어 주변 별셀 7×7 씨앗을 점으로 (물리 0).
     // 활성창 안은 실체 Body 가 그리므로 제외 — 같은 씨앗이라 자리가 안 튄다.
     {
+      // 좌표는 **셀 원점 상대**로 굽고, 원점 이동은 그룹 position 으로 O(1)
+      // 흡수 — 원점(4096px)마다 통재작성하던 64배 낭비의 수리 (P7 CONFIRMED)
       const ccx = Math.floor(g.x / SCELL)
       const ccy = Math.floor(g.y / SCELL)
-      const key = `${ccx},${ccy},${oX3},${oY3},${oZ3}`
+      const key = `${ccx},${ccy}`
       if (key !== this.fieldKey) {
         this.fieldKey = key
         const pos = this.fieldGeo.getAttribute('position') as THREE.BufferAttribute
@@ -1083,7 +1090,7 @@ void main(){
             for (const s of g.cellSystems(cx2, cy2)) {
               if (n >= 2400) break
               if (Math.abs(s.x - g.x) < actR && Math.abs(s.y - g.y) < actR) continue
-              pos.setXYZ(n, s.x - oX3, s.z - oZ3, s.y - oY3)
+              pos.setXYZ(n, s.x - ccx * SCELL, s.z, s.y - ccy * SCELL)
               if (s.arm > 0.4) col.setXYZ(n, 0.62, 0.74, 1.0)
               else col.setXYZ(n, 1.0, 0.8, 0.58)
               n++
@@ -1094,6 +1101,7 @@ void main(){
         pos.needsUpdate = true
         col.needsUpdate = true
       }
+      this.fieldPts.position.set(ccx * SCELL - oX3, -oZ3, ccy * SCELL - oY3)
       this.fieldMat.size = Math.max(400, dist * 0.02)
     }
 
