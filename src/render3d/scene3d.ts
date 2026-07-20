@@ -1170,7 +1170,11 @@ void main(){
           ? b.kind === BodyKind.Sun ? 0.045
             : b.kind === BodyKind.Garden || b.kind === BodyKind.Core ? 0.06 : 0.022
           : b.kind === BodyKind.Dust ? 0.0018 : 0.0035 // 소행성은 티끌 반짝임까지만
-        sc = Math.max(sc, dCam * theta)
+        // 티끌 소실 — 내 12분의 1 미만은 지각 바닥을 비례로 잃는다: 거물의
+        // 눈에 잔챙이는 실크기(≈안 보임)로 돌아간다 ("존나 커지면 자잘한
+        // 애들은 안 보여야지, 언제까지 크게 보여": 실플레이). 초반엔 무변화.
+        const rel = b.r >= R * 1.25 ? 1 : Math.min(1, (b.r * 12) / R)
+        sc = Math.max(sc, dCam * theta * rel)
       }
       this.v3.set(ax, ay, az)
       // 스파게티 신장 — 찢김 직전, 내 쪽 축으로 늘어나고 수직으로 눌린다
