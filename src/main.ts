@@ -362,10 +362,10 @@ function boot(): void {
       expBtn.style.display = 'none'
       if (game.expT < 10) {
         expEl.style.display = 'block'
-        expEl.textContent = `블랙홀화 시작  ${Math.ceil(10 - game.expT)}`
+        expEl.textContent = `곧 행복해진다  ${Math.ceil(10 - game.expT)}`
       } else if (game.expT < 40) {
         expEl.style.display = 'block'
-        expEl.textContent = `블랙홀화  ${Math.ceil(40 - game.expT)}`
+        expEl.textContent = `행복해지는 중  ${Math.ceil(40 - game.expT)}`
       } else {
         expEl.style.display = 'none'
       }
