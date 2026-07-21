@@ -204,6 +204,7 @@ export interface JournalEntry {
 }
 
 const STORE_KEY = 'weishappy:maw:v1'
+const EARTH_ID = hashSeed('sol:지구')
 
 /** 성장 등급 — 이정표. 태양계의 실제 사다리와 맞물린다. */
 export const RANKS: readonly { readonly r: number; readonly name: string }[] = [
@@ -380,6 +381,12 @@ export class Voyage {
   /** 블랙홀 실험 — 버튼을 누르면 10초 카운트, 10~40초 붕괴, 40초 완성 (사용자 사양) */
   expOn = false
   expT = 0
+  /** 플레이어 프록시 — 지구가 나로 대체된 뒤에도 달이 나를 계속 공전하도록 잇는 host 대역 */
+  private readonly me: Body = {
+    id: -1, kind: BodyKind.Sun, r: 1.8, r0: 1.8, cr: 0, cg: 0, cb: 0,
+    x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, host: null, ax: 0, ay: 0, az: 0,
+    orbR: 0, orbA: 0, orbW: 0, ecc: 0, inc: 0, free: false, hot: false,
+  }
   /** 렌더 줌아웃 배율 (scene 이 매 프레임 보고) — 활성 반경이 시야를 따라간다 */
   viewZoom = 1
   /** 자동 항법 중인가 — z 수렴 같은 보조는 이때만 (main 이 매 프레임 세팅) */
@@ -1703,12 +1710,25 @@ export class Voyage {
     this.vy *= drag
     this.vz *= Math.exp(-(lift !== 0 ? 0.14 : 0.5) * step)
 
+    // 플레이어 프록시 동기화 — 지구(=나)를 host 로 삼는 달이 나를 따라 돌게 한다
+    this.me.x = this.x
+    this.me.y = this.y
+    this.me.z = this.z
+    this.me.vx = this.vx
+    this.me.vy = this.vy
+    this.me.vz = this.vz
+    this.me.r = this.radius
+
     // ── 천체 물리 한 패스: 레일(3D) → 내 중력(섭동·틀 끌림·원반화 점성) → 자유체.
     for (const b of this.active) {
       if (this.eaten.has(b.id)) continue
       if (b.host && this.eaten.has(b.host.id)) {
-        b.free = true // 호스트를 잃으면 구심력을 잃는다 — 마지막 접선 속도로 산개
-        b.host = null
+        if (b.host.id === EARTH_ID) {
+          b.host = this.me // 지구는 내가 됐다 — 달은 나(플레이어)를 계속 돈다
+        } else {
+          b.free = true // 호스트를 잃으면 구심력을 잃는다 — 마지막 접선 속도로 산개
+          b.host = null
+        }
       }
       if (!b.free && b.orbR > 0) {
         let rr = b.orbR

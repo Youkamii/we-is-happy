@@ -392,6 +392,7 @@ export class Scene3D {
   private readonly disk: THREE.Mesh
   private readonly diskMat: THREE.ShaderMaterial
   private readonly jets: THREE.Mesh[] = []
+  private jetMat!: THREE.ShaderMaterial
   private readonly stars: THREE.Points
   private readonly sun: THREE.DirectionalLight
   private readonly rivalMeshes: THREE.Mesh[] = []
@@ -657,13 +658,39 @@ void main(){
     this.disk = new THREE.Mesh(new THREE.RingGeometry(0.02, 3.1, 72), this.diskMat)
     this.disk.rotation.x = -Math.PI / 2
     this.scene.add(this.disk)
-    // 상대론적 쌍제트 — 퀘이사 모드에서 스핀축(위아래)으로 뿜는 빛기둥
-    const coneGeo = new THREE.ConeGeometry(0.45, 4, 20, 1, true)
+    // 상대론적 쌍제트 — 스핀축으로 뿜는 발광 빛기둥. 축 그라데이션(뿌리 밝고
+    // 끝 흩어짐)·흰빛 중심 코어·흐르는 마디로 빛기둥을 만든다 (단색 원뿔은 조악했다).
+    const coneGeo = new THREE.ConeGeometry(0.5, 4, 32, 16, true)
+    this.jetMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uPower: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime; uniform float uPower;
+        varying vec2 vUv;
+        float hash(float n){ return fract(sin(n) * 43758.5453123); }
+        void main() {
+          float ax = vUv.y;                            // 0 끝 → 1 뿌리(블랙홀)
+          float core = 1.0 - abs(vUv.x - 0.5) * 2.0;   // 기둥 중심축
+          core = pow(max(core, 0.0), 1.7);
+          float along = smoothstep(0.0, 0.12, ax) * (0.35 + 0.65 * ax); // 뿌리 밝고 끝 흩어짐
+          float flow = 0.6 + 0.4 * hash(floor(ax * 28.0 - uTime * 9.0)); // 흐르는 마디
+          float a = core * along * flow * uPower;
+          vec3 cool = vec3(0.55, 0.72, 1.0);           // 청백 외곽
+          vec3 col = mix(cool, vec3(1.0), core * along * 0.75); // 중심·뿌리 흰빛
+          gl_FragColor = vec4(col, a);
+        }
+      `,
+      transparent: true, blending: THREE.AdditiveBlending,
+      depthWrite: false, side: THREE.DoubleSide,
+    })
     for (const s of [1, -1]) {
-      const jet = new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({
-        color: 0x9fc4ff, blending: THREE.AdditiveBlending, transparent: true,
-        opacity: 0, depthWrite: false, side: THREE.DoubleSide,
-      }))
+      const jet = new THREE.Mesh(coneGeo, this.jetMat)
       jet.rotation.x = s > 0 ? Math.PI : 0
       this.jets.push(jet)
       this.scene.add(jet)
@@ -1681,14 +1708,15 @@ void main(){
     }
     // 제트는 스핀이 민다 (BZ 과정 ∝ a² — 조사 ②-23)
     const jetK = 0.5 + g.spin * 0.8
+    const power = g.quasar * jetK
     for (let i = 0; i < this.jets.length; i++) {
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1
-      const power = g.quasar * jetK
       jet.position.set(px, py + s * R * 2.6 * Math.max(0.3, power), pz)
-      jet.scale.set(R * (0.5 + power), R * (0.6 + power * 2.2), R * (0.5 + power))
-      ;(jet.material as THREE.MeshBasicMaterial).opacity = power * 0.5
+      jet.scale.set(R * (0.55 + power), R * (0.7 + power * 2.6), R * (0.55 + power))
     }
+    this.jetMat.uniforms['uTime']!.value = t
+    this.jetMat.uniforms['uPower']!.value = power
 
     // 렌즈 — 검은 그림자는 몸(BR), 왜곡은 영향권(R 의 √눈금): 분리가 성장의 문법
     this.v3.set(px, py, pz).project(this.camera)
