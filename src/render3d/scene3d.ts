@@ -73,17 +73,16 @@ void main(){
   // 렌즈 배율 — 은은하게 (과하면 링이 화면을 지배한다)
   float mag = clamp(d / max(abs(b), 2e-3), 1.0, 2.2);
   col *= mix(1.0, mag, 0.25);
-  // 중력파 — 시공이라는 연못의 물결. 여러 마루가 동심원으로 퍼지며 그 자리
-  // 배경 별빛을 굴절시킨다 (고리가 아니라 공간을 타고 지나가는 파동).
+  // 중력파 — 순수한 공간의 왜곡. 색도 형체도 없다. 배경 별빛이 물결 따라
+  // 휘기만 한다 (연못에 돌 던진 파문이 지나가며 그 자리 풍경을 일그러뜨리듯).
   if (uWaveT < 1.6) {
     vec2 pw = vUv - uWaveC; pw.x *= uAspect;
     float dw = length(pw);
     float front = uWaveT * 0.62;                          // 파면이 바깥으로 퍼진다
-    float env = exp(-pow((dw - front) / 0.26, 2.0)) * (1.0 - uWaveT / 1.6);
-    float ripple = sin((dw - front) * 34.0) * env;        // 여러 마루의 물결
-    vec2 qw = vUv + (pw / max(dw, 1e-4)) * ripple * 0.035; // 물결 따라 공간이 굴절
+    float env = exp(-pow((dw - front) / 0.30, 2.0)) * (1.0 - uWaveT / 1.6);
+    float ripple = sin((dw - front) * 30.0) * env;        // 여러 마루의 물결
+    vec2 qw = vUv + (pw / max(dw, 1e-4)) * ripple * 0.055; // 오직 굴절 — 배경만 휜다
     col = texture2D(tDiffuse, qw).rgb;
-    col += vec3(0.3, 0.4, 0.62) * abs(ripple) * 0.5;      // 마루에 은은한 빛
   }
   // 중력 적색편이 — 지평선 근처를 빠져나온 빛은 붉고 어둡다
   float gz = sqrt(clamp(1.0 - uR*0.92/max(d,1e-3), 0.0, 1.0));
