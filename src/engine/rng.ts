@@ -69,5 +69,5 @@ export function dailySeed(now: Date): { seed: number; label: string } {
   const m = String(now.getUTCMonth() + 1).padStart(2, '0')
   const d = String(now.getUTCDate()).padStart(2, '0')
   const label = `${y}-${m}-${d}`
-  return { seed: hashSeed(`embertide:${label}`), label }
+  return { seed: hashSeed(`weishappy:${label}`), label }
 }

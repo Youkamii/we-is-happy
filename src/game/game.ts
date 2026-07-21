@@ -931,7 +931,7 @@ export class Game implements FireCtx {
   /**
    * 막 끝 보스. 잔챙이만 15분이면 지루하다 — 막마다 "이번 고비"가 있어야 한다.
    * 보스는 같은 종족의 거대·고체력 개체다(별도 AI 를 만들면 hot loop 에 분기가 는다).
-   * 공개인 이유: 콘솔 디버그 API 이기도 하다 (docs 의 EMBERTIDE.game.spawnBoss()).
+   * 공개인 이유: 콘솔 디버그 API 이기도 하다 (game.spawnBoss()).
    */
   spawnBoss(): void {
     const act = ACTS[this.act]!

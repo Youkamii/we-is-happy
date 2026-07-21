@@ -12,3 +12,6 @@ coverage/
 .gstack/
 
 .vercel
+
+# 내부 설계·조사 문서 — 개인 경로·작업 방법론 포함, 공개 금지
+docs/

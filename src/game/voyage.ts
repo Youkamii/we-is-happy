@@ -203,7 +203,7 @@ export interface JournalEntry {
   readonly y: number
 }
 
-const STORE_KEY = 'embertide:maw:v1'
+const STORE_KEY = 'weishappy:maw:v1'
 
 /** 성장 등급 — 이정표. 태양계의 실제 사다리와 맞물린다. */
 export const RANKS: readonly { readonly r: number; readonly name: string }[] = [

@@ -103,7 +103,7 @@ export function makeResult(g: Game, seedLabel: string): RunResult {
 
 // v2: 점수 공식 교체(2026-07-17). 옛 기록(킬 선형 시절 200만대)과 비교가 성립하지
 // 않아 키를 올린다 — 안 올리면 새 공식으론 영원히 못 깨는 유령 기록이 남는다.
-const KEY = 'embertide:records:v2'
+const KEY = 'weishappy:records:v2'
 
 export interface Records {
   /** 시드 라벨 → 그 시드의 최고 점수 */
