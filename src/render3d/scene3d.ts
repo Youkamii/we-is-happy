@@ -658,9 +658,9 @@ void main(){
     this.disk = new THREE.Mesh(new THREE.RingGeometry(0.02, 3.1, 72), this.diskMat)
     this.disk.rotation.x = -Math.PI / 2
     this.scene.add(this.disk)
-    // 상대론적 쌍제트 — 스핀축으로 뿜는 발광 빛기둥. 축 그라데이션(뿌리 밝고
-    // 끝 흩어짐)·흰빛 중심 코어·흐르는 마디로 빛기둥을 만든다 (단색 원뿔은 조악했다).
-    const coneGeo = new THREE.ConeGeometry(0.5, 4, 32, 16, true)
+    // 상대론적 쌍제트 — 회전축으로 collimated(가늘게 모인) 나선 빔 (M87 제트: 조사).
+    // 가는 빛기둥이 뿌리서 솟아 나선으로 꼬이며 끝으로 흩어진다 (원뿔이 아니다).
+    const coneGeo = new THREE.CylinderGeometry(0.22, 0.06, 4, 24, 20, true)
     this.jetMat = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 }, uPower: { value: 0 } },
       vertexShader: `
@@ -675,14 +675,14 @@ void main(){
         varying vec2 vUv;
         float hash(float n){ return fract(sin(n) * 43758.5453123); }
         void main() {
-          float ax = vUv.y;                            // 0 끝 → 1 뿌리(블랙홀)
-          float core = 1.0 - abs(vUv.x - 0.5) * 2.0;   // 기둥 중심축
-          core = pow(max(core, 0.0), 1.7);
-          float along = smoothstep(0.0, 0.12, ax) * (0.35 + 0.65 * ax); // 뿌리 밝고 끝 흩어짐
-          float flow = 0.6 + 0.4 * hash(floor(ax * 28.0 - uTime * 9.0)); // 흐르는 마디
-          float a = core * along * flow * uPower;
-          vec3 cool = vec3(0.55, 0.72, 1.0);           // 청백 외곽
-          vec3 col = mix(cool, vec3(1.0), core * along * 0.75); // 중심·뿌리 흰빛
+          float ax = vUv.y;                            // 0 뿌리(블랙홀) → 1 끝
+          float along = smoothstep(0.0, 0.06, ax) * (1.0 - smoothstep(0.45, 1.0, ax)); // 뿌리서 솟아 끝으로 흩어짐
+          float sp = sin(vUv.x * 6.2831 * 3.0 + ax * 20.0 - uTime * 5.0); // 나선 3가닥
+          float strand = 0.45 + 0.55 * sp;
+          float flick = 0.7 + 0.3 * hash(floor(ax * 22.0 - uTime * 7.0)); // 흐르는 마디
+          float a = along * strand * flick * uPower;
+          vec3 cool = vec3(0.6, 0.78, 1.0);            // 청백
+          vec3 col = mix(cool, vec3(1.0), strand * along * 0.85); // 나선 마루 흰빛
           gl_FragColor = vec4(col, a);
         }
       `,
@@ -1713,7 +1713,7 @@ void main(){
       const jet = this.jets[i]!
       const s = i === 0 ? 1 : -1
       jet.position.set(px, py + s * R * 2.6 * Math.max(0.3, power), pz)
-      jet.scale.set(R * (0.55 + power), R * (0.7 + power * 2.6), R * (0.55 + power))
+      jet.scale.set(R * (0.3 + power * 0.4), R * (0.9 + power * 3.2), R * (0.3 + power * 0.4))
     }
     this.jetMat.uniforms['uTime']!.value = t
     this.jetMat.uniforms['uPower']!.value = power

@@ -6,7 +6,7 @@
 
 [![We is Happy](assets/blackhole.gif)](https://we-is-happy.vercel.app)
 
-<a href="https://we-is-happy.vercel.app"><img src="https://img.shields.io/badge/▶_PLAY_ME-EC4899?style=for-the-badge&labelColor=EC4899" height="52" alt="PLAY ME"></a>
+**[▶ 이미지를 클릭하면 시뮬레이터로 이동합니다](https://we-is-happy.vercel.app)**
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![three.js](https://img.shields.io/badge/three.js-000000?style=flat-square&logo=three.js&logoColor=white)
