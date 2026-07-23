@@ -54,5 +54,5 @@
 ---
 
 <div align="center">
-<sub>Free for any use, including commercial. Attribution to the source is required.</sub>
+<sub>Licensed under the <a href="LICENSE">MIT License</a> — free for any use, including commercial. Keep the copyright and license notice.</sub>
 </div>
